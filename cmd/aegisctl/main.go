@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"text/tabwriter"
 
@@ -23,13 +24,15 @@ import (
 )
 
 func main() {
-	if err := run(os.Args[1:]); err != nil {
+	if err := run(os.Args[1:], os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, "aegisctl:", err)
 		os.Exit(1)
 	}
 }
 
-func run(args []string) error {
+// run dispatches one admin subcommand against the database at AEGIS_DB_PATH.
+// stdout is injected (tabwriter target) so tests can capture the tables.
+func run(args []string, stdout io.Writer) error {
 	cfg := config.Load()
 	st, err := store.Open(cfg.DBPath)
 	if err != nil {
@@ -43,14 +46,14 @@ func run(args []string) error {
 	}
 	switch args[0] {
 	case "rules":
-		return rulesCmd(ctx, st, cfg, args[1:])
+		return rulesCmd(ctx, st, cfg, args[1:], stdout)
 	case "stats":
-		return statsCmd(ctx, st)
+		return statsCmd(ctx, st, stdout)
 	case "replay":
 		if len(args) != 2 {
 			return fmt.Errorf("usage: aegisctl replay <trace-id>")
 		}
-		return replayCmd(ctx, st, args[1])
+		return replayCmd(ctx, st, args[1], stdout)
 	default:
 		return usage()
 	}
@@ -60,7 +63,7 @@ func usage() error {
 	return fmt.Errorf("usage: aegisctl rules list|mine|promote <name>|demote <name> | stats | replay <trace-id>")
 }
 
-func rulesCmd(ctx context.Context, st *store.Store, cfg config.Config, args []string) error {
+func rulesCmd(ctx context.Context, st *store.Store, cfg config.Config, args []string, stdout io.Writer) error {
 	if len(args) == 0 {
 		return fmt.Errorf("usage: aegisctl rules list|mine|promote <name>|demote <name>")
 	}
@@ -70,7 +73,7 @@ func rulesCmd(ctx context.Context, st *store.Store, cfg config.Config, args []st
 		if err != nil {
 			return err
 		}
-		w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+		w := tabwriter.NewWriter(stdout, 0, 2, 2, ' ', 0)
 		fmt.Fprintln(w, "NAME\tSTATE\tORIGIN\tENABLED\tTOOL\tPATTERN")
 		for _, r := range rules {
 			fmt.Fprintf(w, "%v\t%v\t%v\t%v\t%v\t%v\n",
@@ -88,13 +91,13 @@ func rulesCmd(ctx context.Context, st *store.Store, cfg config.Config, args []st
 			return err
 		}
 		if len(proposals) == 0 {
-			fmt.Println("no eligible clusters (raise traffic or lower --threshold)")
+			fmt.Fprintln(stdout, "no eligible clusters (raise traffic or lower --threshold)")
 			return nil
 		}
 		for _, p := range proposals {
-			fmt.Printf("shadow rule %s: %s → %s (cluster %d)\n", p.Name, p.Pattern, p.Tool, p.ClusterSize)
+			fmt.Fprintf(stdout, "shadow rule %s: %s → %s (cluster %d)\n", p.Name, p.Pattern, p.Tool, p.ClusterSize)
 		}
-		fmt.Println("\nnext: drive traffic matching the shape; promotion is automatic after agreement streak")
+		fmt.Fprintln(stdout, "\nnext: drive traffic matching the shape; promotion is automatic after agreement streak")
 		return nil
 	case "promote":
 		if len(args) != 2 {
@@ -111,17 +114,17 @@ func rulesCmd(ctx context.Context, st *store.Store, cfg config.Config, args []st
 	}
 }
 
-func statsCmd(ctx context.Context, st *store.Store) error {
+func statsCmd(ctx context.Context, st *store.Store, stdout io.Writer) error {
 	s, err := st.Stats(ctx)
 	if err != nil {
 		return err
 	}
 	out, _ := json.MarshalIndent(s, "", "  ")
-	fmt.Println(string(out))
+	fmt.Fprintln(stdout, string(out))
 	return nil
 }
 
-func replayCmd(ctx context.Context, st *store.Store, traceID string) error {
+func replayCmd(ctx context.Context, st *store.Store, traceID string, stdout io.Writer) error {
 	trail, err := st.Replay(ctx, traceID)
 	if err != nil {
 		return err
@@ -129,7 +132,7 @@ func replayCmd(ctx context.Context, st *store.Store, traceID string) error {
 	if len(trail) == 0 {
 		return fmt.Errorf("no audit rows for trace %s", traceID)
 	}
-	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+	w := tabwriter.NewWriter(stdout, 0, 2, 2, ' ', 0)
 	fmt.Fprintln(w, "TS\tIFACE\tSOURCE\tRULE\tMODEL\tLATENCY\tOUTCOME")
 	for _, a := range trail {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%dms\t%s\n",

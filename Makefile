@@ -29,6 +29,8 @@ lint: vet
 
 # Non-generated packages: internal/pb is committed protoc output (make proto),
 # exercised behaviorally through internal/grpcapi's in-process client.
+# The gate counts TestGoFiles OR XTestGoFiles: a package whose tests live in
+# the external foo_test package (internal/app does) is still tested.
 PKGS := $(shell go list ./... | grep -v /internal/pb)
 
 .PHONY: cover cover-html check e2e
@@ -44,7 +46,7 @@ check:
 		echo "check: skipped tests found — project law forbids them"; exit 1; \
 	fi; \
 	bad=""; for p in $(PKGS); do \
-		if [ "$$(go list -f '{{len .TestGoFiles}}' $$p)" = "0" ]; then bad="$$bad $$p"; fi; \
+		if [ "$$(go list -f '{{if or .TestGoFiles .XTestGoFiles}}y{{end}}' $$p)" != "y" ]; then bad="$$bad $$p"; fi; \
 	done; \
 	if [ -n "$$bad" ]; then echo "check: packages without tests:$$bad"; exit 1; fi; \
 	echo "check: no TODO/FIXME, no skipped tests, every non-generated package tested"

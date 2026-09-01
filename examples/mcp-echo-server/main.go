@@ -19,6 +19,16 @@ import (
 )
 
 func main() {
+	if err := server.ServeStdio(newServer()); err != nil {
+		fmt.Fprintln(os.Stderr, "mcp-echo-server:", err)
+		os.Exit(1)
+	}
+}
+
+// newServer builds the MCP server with both example tools registered. Split
+// out of main so tests can exercise registration in-process (in-process
+// client) instead of over stdio.
+func newServer() *server.MCPServer {
 	s := server.NewMCPServer("mcp-echo-server", "0.1.0",
 		server.WithToolCapabilities(false),
 	)
@@ -36,10 +46,7 @@ func main() {
 	)
 	s.AddTool(head, csvHeadHandler)
 
-	if err := server.ServeStdio(s); err != nil {
-		fmt.Fprintln(os.Stderr, "mcp-echo-server:", err)
-		os.Exit(1)
-	}
+	return s
 }
 
 func echoHandler(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
