@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -122,14 +123,44 @@ func TestNormalizePrompt(t *testing.T) {
 		"summarize data/2024.csv":  "summarize <path>",
 		"summarize data/2025.csv":  "summarize <path>",
 		"total for 2024 and 2025":  "total for <n> and <n>",
+		"average of 3.5 and 1,000": "average of <n> and <n>",
 		`echo "hello world" again`: "echo <q> again",
 		`echo "data/1.csv" again`:  "echo <q> again",
 		"how many rows":            "how many rows",
+		"":                         "",
 	}
 	for in, want := range cases {
 		if got := NormalizePrompt(in); got != want {
 			t.Errorf("Normalize(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// TestOpenUncreatablePathFails checks the fail-fast contract for bad paths:
+// Open must return the ping error (and close the pool) instead of handing
+// back a store that fails on first use.
+func TestOpenUncreatablePathFails(t *testing.T) {
+	_, err := Open(filepath.Join(t.TempDir(), "no-such-dir", "x.db"))
+	if err == nil {
+		t.Fatal("Open with a missing parent directory should fail")
+	}
+}
+
+// TestGetAnswerCorruptExpiry covers the guarded parse: a malformed
+// expires_ts must surface as an error, never as a phantom answer.
+func TestGetAnswerCorruptExpiry(t *testing.T) {
+	s, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+
+	mustExec(t, s,
+		`INSERT INTO answers (trace_id, status, output, created_ts, expires_ts)
+		 VALUES ('bad','done','o','2026-09-01T00:00:00Z','not-a-timestamp')`)
+	if _, ok, err := s.GetAnswer(ctx, "bad"); err == nil || !strings.Contains(err.Error(), "parsing expires_ts") {
+		t.Errorf("GetAnswer(corrupt expiry) = ok=%v err=%v, want parsing expires_ts error", ok, err)
 	}
 }
 
