@@ -7,9 +7,6 @@ import (
 	"io"
 	"strconv"
 	"time"
-
-	"github.com/microsoft/agent-framework-go/tool"
-	"github.com/microsoft/agent-framework-go/tool/functool"
 )
 
 // csvPreview is the max rows read_csv returns when max_rows is unset.
@@ -52,8 +49,8 @@ type CSVColumn struct {
 }
 
 // NewReadCSV builds the read_csv tool bound to a workspace root.
-func NewReadCSV(workspace string) (tool.FuncTool, error) {
-	return functool.New(functool.Config{
+func NewReadCSV(workspace string) (Tool, error) {
+	return New(Config{
 		Name:        "read_csv",
 		Description: "Read a CSV file from the workspace. Returns column names, a preview of data rows, and the total row count. Use csv_stats first when you only need shape/type information.",
 	}, func(ctx context.Context, in CSVReadInput) (CSVReadOutput, error) {
@@ -66,8 +63,8 @@ func NewReadCSV(workspace string) (tool.FuncTool, error) {
 }
 
 // NewCSVStats builds the csv_stats tool bound to a workspace root.
-func NewCSVStats(workspace string) (tool.FuncTool, error) {
-	return functool.New(functool.Config{
+func NewCSVStats(workspace string) (Tool, error) {
+	return New(Config{
 		Name:        "csv_stats",
 		Description: "Get statistics for a CSV file: total rows and, per column, the name, empty-cell count, and detected kind (number, date, or text).",
 	}, func(ctx context.Context, in CSVStatsInput) (CSVStatsOutput, error) {
@@ -178,6 +175,35 @@ func csvStats(workspace, name string) (CSVStatsOutput, error) {
 		}
 	}
 	return CSVStatsOutput{TotalRows: rows, Columns: cols}, nil
+}
+
+// readAllCSV reads every record of a workspace CSV (bounded by maxRows),
+// returning records and headers. Used by the SQL tool's attach_csv.
+func readAllCSV(path string, maxRows int) ([][]string, []string, error) {
+	f, err := openCSV(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer f.Close()
+
+	r := csv.NewReader(f)
+	r.FieldsPerRecord = -1
+	headers, err := r.Read()
+	if err != nil {
+		return nil, nil, fmt.Errorf("reading header: %w", err)
+	}
+	var records [][]string
+	for len(records) < maxRows {
+		rec, err := r.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, nil, fmt.Errorf("reading record: %w", err)
+		}
+		records = append(records, rec)
+	}
+	return records, headers, nil
 }
 
 // looksLikeDate recognizes the handful of date layouts that realistically

@@ -1,6 +1,8 @@
-// Command aegis-agent runs the AegisGo agent from the command line: one-shot
-// with a prompt argument, or interactive (no argument). Configuration is
-// entirely environment-driven (see internal/config).
+// Command aegis-agent runs the AegisGo hybrid agent from the command line:
+// one-shot with a prompt argument, or interactive (no argument). The
+// deterministic router answers matching commands instantly with zero LLM
+// cost; everything else falls back to the configured provider. All
+// configuration is environment-driven (see internal/config).
 package main
 
 import (
@@ -14,13 +16,11 @@ import (
 	"os/signal"
 	"strings"
 
-	"github.com/microsoft/agent-framework-go/agent"
-	"github.com/microsoft/agent-framework-go/tool"
-
+	"aegisgo/internal/app"
 	"aegisgo/internal/config"
-	"aegisgo/internal/mcpclient"
-	"aegisgo/internal/provider"
-	"aegisgo/internal/tools"
+	"aegisgo/internal/engine"
+	"aegisgo/internal/store"
+	"aegisgo/internal/trace"
 )
 
 func main() {
@@ -38,59 +38,33 @@ func run(ctx context.Context, tierFlag string, args []string) error {
 	if err != nil {
 		return err
 	}
-
 	cfg := config.Load()
-	if err := cfg.Validate(); err != nil {
-		return err
-	}
 
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt)
 	defer stop()
 
-	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-
-	builtin, err := tools.Builtin(cfg.WorkspaceDir())
+	a, cleanup, err := app.Build(ctx, cfg, tier, store.IFaceCLI,
+		slog.New(slog.NewTextHandler(os.Stderr, nil)))
 	if err != nil {
 		return err
 	}
-	mcpTools, release, err := mcpclient.Connect(ctx, cfg.MCPServers)
-	if err != nil {
-		return err
-	}
-	defer release()
-
-	a, err := provider.New(cfg, tier, append(append([]tool.Tool{}, builtin...), mcpTools...), logger)
-	if err != nil {
-		return err
-	}
-	logger.Info("agent ready",
-		"provider", cfg.Provider,
-		"model", cfg.ModelFor(tier),
-		"tier", tier,
-		"workspace", cfg.WorkspaceDir(),
-		"mcp_tools", len(mcpTools),
-		"builtin_tools", len(builtin),
-	)
+	defer cleanup()
 
 	if len(args) > 0 {
-		return oneShot(ctx, a, strings.Join(args, " "))
+		_, rctx := trace.New(ctx, "")
+		res := a.Engine.Run(rctx, strings.Join(args, " "))
+		fmt.Println(res.Answer)
+		return nil
 	}
-	return repl(ctx, a)
-}
-
-func oneShot(ctx context.Context, a *agent.Agent, prompt string) error {
-	resp, err := a.RunText(ctx, prompt).Collect()
-	if err != nil {
-		return err
-	}
-	fmt.Println(resp.String())
-	return nil
+	return repl(ctx, a.Engine)
 }
 
 // repl reads prompts line by line until blank line, "exit", "quit", or EOF.
-// Each line is an independent run (no history carries over yet).
-func repl(ctx context.Context, a *agent.Agent) error {
+// Router hits print with their rule id and latency; LLM answers show their
+// decision source so cost behavior is visible while working.
+func repl(ctx context.Context, eng *engine.Engine) error {
 	fmt.Println("aegis-agent interactive mode — empty line or Ctrl-D to exit")
+	fmt.Println("router commands: /uptime /disk /memory /hostname /kernel /who /csv_summary <path> /csv_head <path> [n]")
 	sc := bufio.NewScanner(os.Stdin)
 	sc.Buffer(make([]byte, 64*1024), 1024*1024)
 	for {
@@ -103,14 +77,16 @@ func repl(ctx context.Context, a *agent.Agent) error {
 		if prompt == "" || prompt == "exit" || prompt == "quit" {
 			return nil
 		}
-		resp, err := a.RunText(ctx, prompt).Collect()
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				return nil
-			}
-			fmt.Fprintln(os.Stderr, "error:", err)
-			continue
+		_, rctx := trace.New(ctx, "")
+		res := eng.Run(rctx, prompt)
+		if res.RuleID != "" {
+			fmt.Printf("[%s via %s, %dms]\n", res.DecisionSource, res.RuleID, res.LatencyMS)
+		} else {
+			fmt.Printf("[%s, %dms]\n", res.DecisionSource, res.LatencyMS)
 		}
-		fmt.Println(resp.String())
+		fmt.Println(res.Answer)
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return nil
+		}
 	}
 }

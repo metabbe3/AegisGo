@@ -8,9 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/microsoft/agent-framework-go/tool"
-	"github.com/microsoft/agent-framework-go/tool/functool"
 )
 
 // docMaxBytes is the default (and hard) cap on read_doc output. Keeping tool
@@ -47,8 +44,8 @@ type DocReadOutput struct {
 }
 
 // NewReadDoc builds the read_doc tool bound to a workspace root.
-func NewReadDoc(workspace string) (tool.FuncTool, error) {
-	return functool.New(functool.Config{
+func NewReadDoc(workspace string) (Tool, error) {
+	return New(Config{
 		Name:        "read_doc",
 		Description: "Read a text document from the workspace (txt, md, json, log, yaml, xml, html, csv). Returns up to max_bytes of content; use offset to page through larger files.",
 	}, func(ctx context.Context, in DocReadInput) (DocReadOutput, error) {

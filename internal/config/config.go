@@ -70,6 +70,24 @@ type Config struct {
 
 	// LogLevel is the slog level name: debug, info, warn, or error.
 	LogLevel string
+
+	// LLM toggles the fallback: "on" (default) or "off". Off makes every
+	// router miss return fast without a provider — the kill switch.
+	LLM string
+
+	// DBPath is the embedded SQLite file for audit/rules/answers
+	// (default "aegisgo.db" in the working directory).
+	DBPath string
+
+	// SQLDSN optionally points the sql_query tool at an external
+	// database/sql DSN (empty = embedded SQLite at DBPath).
+	SQLDSN string
+
+	// SQLMode is "ro" (default) or "rw" for the sql_query tool.
+	SQLMode string
+
+	// RulesReloadSecs is the rules-table hot-reload interval; 0 disables.
+	RulesReloadSecs int
 }
 
 // Load reads configuration from the environment and applies defaults.
@@ -88,8 +106,16 @@ func Load() Config {
 		MCPServers:      parseList(os.Getenv("AEGIS_MCP_SERVERS")),
 		Addr:            envOr("AEGIS_ADDR", ":8080"),
 		LogLevel:        envOr("AEGIS_LOG_LEVEL", "info"),
+		LLM:             envOr("AEGIS_LLM", "on"),
+		DBPath:          envOr("AEGIS_DB_PATH", "aegisgo.db"),
+		SQLDSN:          strings.TrimSpace(os.Getenv("AEGIS_SQL_DSN")),
+		SQLMode:         envOr("AEGIS_SQL_MODE", "ro"),
+		RulesReloadSecs: AtoiDefault(os.Getenv("AEGIS_RULES_RELOAD"), 30),
 	}
 }
+
+// LLMDisabled reports whether the LLM fallback kill switch is on.
+func (c Config) LLMDisabled() bool { return strings.EqualFold(c.LLM, "off") }
 
 // Validate reports configuration problems before anything dials out.
 func (c Config) Validate() error {

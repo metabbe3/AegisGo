@@ -1,6 +1,9 @@
-// Command aegis-serve runs the AegisGo agent as a long-lived HTTP service
-// for other microservices to call (see internal/server). Designed to run as
-// a systemd unit on a Linux server — single binary, no runtime deps.
+// Command aegis-serve runs the AegisGo hybrid agent as a long-lived HTTP
+// service for other microservices to call (see internal/server): sync and
+// async runs, health/readiness probes, trace IDs on every request.
+// Designed to run as a systemd unit on a Linux server — single binary, no
+// runtime deps, router-first so it stays useful even when the provider is
+// down (AEGIS_LLM=off).
 package main
 
 import (
@@ -15,13 +18,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/microsoft/agent-framework-go/tool"
-
+	"aegisgo/internal/app"
 	"aegisgo/internal/config"
-	"aegisgo/internal/mcpclient"
-	"aegisgo/internal/provider"
 	"aegisgo/internal/server"
-	"aegisgo/internal/tools"
+	"aegisgo/internal/store"
 )
 
 func main() {
@@ -40,9 +40,6 @@ func serve(ctx context.Context, tierFlag string) error {
 		return err
 	}
 	cfg := config.Load()
-	if err := cfg.Validate(); err != nil {
-		return err
-	}
 
 	// Graceful shutdown on SIGINT/SIGTERM (systemd stop).
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
@@ -50,30 +47,21 @@ func serve(ctx context.Context, tierFlag string) error {
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
-	builtin, err := tools.Builtin(cfg.WorkspaceDir())
+	a, cleanup, err := app.Build(ctx, cfg, tier, store.IFaceREST, logger)
 	if err != nil {
 		return err
 	}
-	mcpTools, release, err := mcpclient.Connect(ctx, cfg.MCPServers)
-	if err != nil {
-		return err
-	}
-	defer release()
-
-	a, err := provider.New(cfg, tier, append(append([]tool.Tool{}, builtin...), mcpTools...), logger)
-	if err != nil {
-		return err
-	}
+	defer cleanup()
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           server.Handler(a, logger),
+		Handler:           server.Handler(server.Deps{Engine: a.Engine, Answers: a.Store, Readines: a.Store, Logger: logger}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
 	errCh := make(chan error, 1)
 	go func() {
-		logger.Info("listening", "addr", cfg.Addr, "provider", cfg.Provider, "model", cfg.ModelFor(tier), "tier", tier)
+		logger.Info("listening", "addr", cfg.Addr)
 		errCh <- srv.ListenAndServe()
 	}()
 
@@ -87,6 +75,12 @@ func serve(ctx context.Context, tierFlag string) error {
 		logger.Info("shutting down")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		return srv.Shutdown(shutdownCtx)
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			return err
+		}
+		// Give in-flight async runs a beat to persist their answers, then
+		// close the store (cleanup drains queued audit writes).
+		time.Sleep(500 * time.Millisecond)
+		return nil
 	}
 }

@@ -8,20 +8,13 @@ import (
 	"testing"
 )
 
-// callTool invokes a FuncTool with a JSON argument body, decoding the result
-// into out.
-func callTool(t *testing.T, name string, f any, args string, out any) {
+// callTool invokes a Tool via the deterministic Execute path, decoding the
+// result into out.
+func callTool(t *testing.T, name string, f Tool, args string, out any) {
 	t.Helper()
-	type funcTool interface {
-		Call(ctx context.Context, args string) (any, error)
-	}
-	ft, ok := f.(funcTool)
-	if !ok {
-		t.Fatalf("%s: not a FuncTool: %T", name, f)
-	}
-	res, err := ft.Call(context.Background(), args)
+	res, err := f.Execute(context.Background(), []byte(args))
 	if err != nil {
-		t.Fatalf("%s: Call: %v", name, err)
+		t.Fatalf("%s: Execute: %v", name, err)
 	}
 	raw, err := json.Marshal(res)
 	if err != nil {
@@ -86,8 +79,7 @@ func TestReadCSVEscapesWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = tl.Call(context.Background(), `{"path":"../../etc/passwd"}`)
-	if err == nil {
+	if _, err := tl.Execute(context.Background(), []byte(`{"path":"../../etc/passwd"}`)); err == nil {
 		t.Fatal("expected escape error, got nil")
 	}
 }
@@ -118,11 +110,11 @@ func TestCSVStats(t *testing.T) {
 }
 
 func TestBuiltinRegistry(t *testing.T) {
-	set, err := Builtin(workspace(t))
+	set, err := Builtin(Options{Workspace: workspace(t)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"read_csv", "csv_stats", "read_doc"}
+	want := []string{"read_csv", "csv_stats", "read_doc", "system_command", "sql_query"}
 	if len(set) != len(want) {
 		t.Fatalf("got %d tools, want %d", len(set), len(want))
 	}
@@ -130,5 +122,47 @@ func TestBuiltinRegistry(t *testing.T) {
 		if set[i].Name() != name {
 			t.Errorf("tool[%d] = %q, want %q", i, set[i].Name(), name)
 		}
+	}
+
+	reg, err := NewRegistry(set...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := reg.Get("sql_query"); !ok {
+		t.Error("sql_query not indexed")
+	}
+	if len(reg.FuncTools()) != len(want) {
+		t.Errorf("FuncTools = %d, want %d", len(reg.FuncTools()), len(want))
+	}
+	if _, err := NewRegistry(append(set, set[0])...); err == nil {
+		t.Error("duplicate tool names should be rejected")
+	}
+}
+
+// TestDualEntryParity checks the §6 contract: the deterministic Execute
+// path and the LLM FuncTool path run the same handler with the same result.
+func TestDualEntryParity(t *testing.T) {
+	tl, err := NewReadCSV(workspace(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := `{"path":"testdata/sample.csv","max_rows":3}`
+
+	viaExec, err := tl.Execute(context.Background(), []byte(args))
+	if err != nil {
+		t.Fatal(err)
+	}
+	viaLLM, err := tl.FuncTool().Call(context.Background(), args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	execOut, ok1 := viaExec.(CSVReadOutput)
+	llmOut, ok2 := viaLLM.(CSVReadOutput)
+	if !ok1 || !ok2 {
+		t.Fatalf("types: %T vs %T", viaExec, viaLLM)
+	}
+	if execOut.TotalRows != llmOut.TotalRows || len(execOut.Rows) != len(llmOut.Rows) ||
+		execOut.Columns[0] != llmOut.Columns[0] {
+		t.Errorf("divergence: exec=%+v llm=%+v", execOut, llmOut)
 	}
 }

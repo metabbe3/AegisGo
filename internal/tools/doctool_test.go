@@ -54,10 +54,10 @@ func TestReadDocRejectsBinaryAndEscapes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tl.Call(context.Background(), `{"path":"testdata/sample.pdf"}`); err == nil {
+	if _, err := tl.Execute(context.Background(), []byte(`{"path":"testdata/sample.pdf"}`)); err == nil {
 		t.Error("expected extension rejection")
 	}
-	if _, err := tl.Call(context.Background(), `{"path":"/etc/passwd"}`); err == nil {
+	if _, err := tl.Execute(context.Background(), []byte(`{"path":"/etc/passwd"}`)); err == nil {
 		t.Error("expected workspace-escape rejection")
 	}
 }

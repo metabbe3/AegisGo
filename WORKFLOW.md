@@ -11,77 +11,110 @@
 
 ## Task Recipes
 
+### Add a router rule
+
+Rules live in the SQLite `rules` table (seeded from
+`internal/router/seeded.go` on first boot) and hot-reload every
+`AEGIS_RULES_RELOAD` seconds (default 30; 0 disables). Two ways:
+
+- **At runtime**: `sqlite3 aegisgo.db "INSERT INTO rules (name,pattern,tool,args_template,origin,enabled,created_ts) VALUES ('disk_free', '/diskfree', 'system_command', '{\"command\":\"disk\"}', 'seed', 1, datetime())"`
+  — live within one reload interval, no restart.
+- **In code** (persistent for fresh deployments): edit `Seeded()`, delete
+  `aegisgo.db`'s rules or INSERT manually; keep specific patterns before
+  general ones (first match wins).
+
+Rules of rules: anchored automatically; capture groups splice as `"$1"`
+(quoted, escaped) or bare `$1` (only when the regex validates the shape,
+e.g. `(\d+)`); the referenced tool must exist or startup fails loudly.
+
 ### Add a builtin tool
 
 1. Create `internal/tools/<name>tool.go`: define `In`/`Out` structs (field
    comments become the schema description the LLM reads), build with
-   `functool.New`, bind to a workspace root, resolve paths via `resolvePath`.
+   `tools.New(Config{...}, typedHandler)`.
 2. Append it in `internal/tools/registry.go` — never reorder existing tools.
-3. Unit test against `testdata/` (or a temp dir): happy path, bounds, and a
-   workspace-escape rejection.
-4. If it replaces or renames a tool, update CLAUDE.md's architecture map.
+3. File access goes through `resolvePath`; cap returned size.
+4. Tests: happy path, bounds, workspace-escape rejection, and dual-entry
+   parity (same args → same result via `Execute` and `FuncTool().Call`).
 
-### Add an LLM provider
+### Add a system-command catalog entry
 
-1. Add a constant + validation branch in `internal/config`.
-2. Add a case in `internal/provider.New` constructing the provider client
-   from env config. Everything else (tools, MCP, serving) is provider-blind.
-3. Smoke-test with real creds locally in a shell (`AEGIS_*` env), never in
-   committed tests.
+Edit `catalog` in `internal/tools/systemtool.go`: fixed argv, no
+user-controlled flags, unix command that terminates on its own. If a
+useful command needs arguments, the *rule* or the *LLM* selects between
+several fixed-argv variants (see `disk` vs a hypothetical `disk_inodes`) —
+input still never reaches argv. Update the tool description string and the
+repl banner in cmd/aegis-agent.
+
+### Point sql_query at a real database
+
+Default is the embedded SQLite file (read-only). To query an external DB:
+
+1. `go get github.com/jackc/pgx/v5/stdlib` (or your driver), import it
+   blank in `internal/tools/sqltool.go`.
+2. Set `AEGIS_SQL_DSN=postgres://...`. `?`-placeholder policy applies;
+   read-only enforcement falls back to the statement-prefix allowlist, so
+   consider a read-replica DSN.
 
 ### Attach an external MCP server
 
-No code. Set, e.g.:
+No code:
 
 ```bash
-AEGIS_MCP_SERVERS="stdio:/usr/local/bin/some-mcp-server --flag,https://mcp.internal:8443/mcp"
+export AEGIS_MCP_SERVERS="stdio:/usr/local/bin/some-mcp-server,https://mcp.internal:8443/mcp"
 ```
 
-stdio specs run a subprocess; http(s) URLs use streamable HTTP. Startup fails
-fast if any server is unreachable — intentional (see connect.go).
+Remote tools join the LLM's toolset (they are not router-addressable —
+rules reference builtin tools only, by design). Startup fails fast if any
+server is unreachable.
 
-### Expose your own tools as an MCP server
+### Add an LLM provider
 
-Copy `examples/mcp-echo-server/` — it is the reference for the mcp-go server
-side (tool schema, handlers, stdio transport) that other agents can consume.
+1. Constant + validation branch in `internal/config`.
+2. A case in `internal/provider.New`. Everything above (router, tools,
+   MCP, serving) is provider-blind.
+3. Smoke-test with real creds in a shell (`AEGIS_*`), never in committed
+   tests.
+
+### Operate the audit trail
+
+```bash
+sqlite3 aegisgo.db "SELECT decision_source, COUNT(*), AVG(latency_ms) FROM audit_events GROUP BY 1"
+sqlite3 aegisgo.db "SELECT normalized_prompt, COUNT(*) c FROM fallback_events GROUP BY 1 ORDER BY c DESC LIMIT 10"  # Phase-3 mining preview
+```
+
+The answers table TTLs rows out (~15 min) and lazily deletes on read.
 
 ### Bump dependencies
 
 `mcp-go`: prefer stable tags. `agent-framework-go`: pinned to a commit (no
 tags upstream); after bumping, check constructor signatures against
-`reference/agent-framework-go` and run the full gate plus one real run.
+`reference/agent-framework-go`, run the full gate plus one real run.
+`modernc.org/sqlite`: rerun `TestConcurrentAuditNoBusy` (the batcher gate).
 
 ## Release / Deploy (Linux)
 
 ```bash
-make build                     # or: GOOS=linux GOARCH=amd64 go build -o bin/ ./cmd/...
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/ ./cmd/...
 scp bin/aegis-serve user@host:~/
 ```
 
-`deploy/aegis-serve.service` is a systemd unit template:
-
-```bash
-sudo cp deploy/aegis-serve.service /etc/systemd/system/
-sudo systemctl daemon-reload && sudo systemctl enable --now aegis-serve
-```
-
-Keep provider env vars in the unit's `Environment=` lines or a
-`/etc/aegisgo.env` file — never in the repo.
+`deploy/aegis-serve.service` is a systemd unit template. Router-only
+degradation: set `AEGIS_LLM=off` in the unit and the service survives
+provider outages (deterministic commands keep answering). Keep provider
+env vars in `EnvironmentFile=/etc/aegisgo.env`, never in the repo.
 
 ## Reference Repos
 
-`make clone-refs` (or the initial setup) shallow-clones both upstream
-libraries under `reference/`. They are gitignored and **read-only**:
-
-- consult their `examples/` when framework APIs churn;
-- never import from `reference/` — dependencies come from go.mod;
-- refresh with `git -C reference/<repo> pull` when needed.
+`make clone-refs` shallow-clones both upstream libraries under
+`reference/` (gitignored, read-only): consult their examples when framework
+APIs churn; never import from `reference/`.
 
 ## Commit / PR Conventions
 
-- Subject: imperative, ≤72 chars. Body: what + why, mention env var or
+- Subject: imperative, ≤72 chars. Body: what + why; mention env var or
   behavior changes.
-- Dependency bumps are their own commit, never mixed with features.
-- Anything touching `internal/tools` path safety or `internal/config`
-  validation deserves an extra careful re-read — those are the security and
-  fail-fast boundaries.
+- Dependency bumps are their own commit.
+- Anything touching `resolvePath`, the system_command catalog, SQL policy,
+  or the store's batcher deserves an extra careful re-read — those are the
+  security and data-integrity boundaries.

@@ -1,99 +1,136 @@
 # AegisGo
 
-Reusable Go template for **lightweight AI agents on Linux servers**: one
-static binary that reads workspace files (CSV/docs), calls external tools
-over **MCP**, talks to any major LLM provider via **environment variables**,
-and serves other microservices over REST.
+Reusable Go template for a **hybrid** AI agent on a Linux server:
+deterministic Go code answers anything rule-shaped — instantly, for free,
+even during provider outages — and the LLM is strictly the fallback
+reasoner for everything else. One static binary (pure Go, no CGo), audit
+trail in embedded SQLite, MCP for external tools, REST for your
+microservices.
 
-Built on [microsoft/agent-framework-go] (agent loop) and [mark3labs/mcp-go]
-(MCP client). MIT licensed.
+Built on [microsoft/agent-framework-go] (agent loop), [mark3labs/mcp-go]
+(MCP), and [modernc.org/sqlite] (pure-Go embedded storage). MIT licensed.
+
+## The hybrid pipeline
+
+```
+request ──▶ trace ID ──▶ deterministic router ──match──▶ native Go tool ──▶ answer
+ (REST/CLI)                  (regex rules,                       (csv/sql/system, ~0ms, $0)
+                              hot-reloaded)                            │
+                              │ miss                                  │
+                              ▼                                       │
+                          LLM fallback ─────── every run audited ─────┘
+                          (provider+tier)      decision_source, trace_id,
+                               │               rule_id, latency, cost corpus
+                               ▼
+                    AEGIS_LLM=off → fast "disabled" answer (kill switch)
+```
 
 ## Quickstart
 
 ```bash
-make build          # bin/aegis-agent + bin/aegis-serve
-make test           # no keys or network needed
+make build && make test      # no keys or network needed
+AEGIS_LLM=off bin/aegis-agent /uptime        # instant, zero credentials
+AEGIS_LLM=off bin/aegis-agent /csv_head testdata/sample.csv 5
+AEGIS_LLM=off bin/aegis-agent "any question" # kill switch: no LLM configured
 ```
 
-Ask a question about the sample CSV:
+With a model behind it (free, local — [Ollama]):
 
 ```bash
-export AEGIS_PROVIDER=openai AEGIS_MODEL=gpt-4o-mini OPENAI_API_KEY=sk-...
-bin/aegis-agent "Summarize testdata/sample.csv: total revenue by shipped status"
-```
-
-Or with a free local model via [Ollama]:
-
-```bash
-export AEGIS_PROVIDER=openai-compat AEGIS_MODEL=llama3
+export AEGIS_PROVIDER=openai-compat AEGIS_MODEL=qwen2.5:0.5b
 export OPENAI_API_KEY=ollama OPENAI_BASE_URL=http://localhost:11434/v1
-bin/aegis-agent "What is the most ordered item in testdata/sample.csv?"
+bin/aegis-agent "How many rows in testdata/sample.csv? Use the read_csv tool."
+bin/aegis-agent --tier fast "quick question"   # cheap model tier
 ```
 
-Run as a service for your microservices:
+Or OpenAI / Anthropic / Foundry — see the env table.
+
+## Serve it (REST for your microservices)
 
 ```bash
-AEGIS_ADDR=:8080 bin/aegis-serve &
-curl -s localhost:8080/v1/agent/run -d '{"prompt":"How many rows in testdata/sample.csv?"}'
-# {"output":"10 ..."}
+AEGIS_LLM=off AEGIS_ADDR=:8080 bin/aegis-serve &
+curl -s localhost:8080/healthz                       # liveness
+curl -s localhost:8080/readyz                        # readiness (store reachable)
+curl -s localhost:8080/v1/agent/run -d '{"prompt":"/uptime"}' -H 'X-Trace-Id: t-42'
+#   {"output":"...","decision_source":"regex_router","trace_id":"t-42","latency_ms":3}
+curl -s -X POST 'localhost:8080/v1/agent/run?async=1' -d '{"prompt":"hard question"}'
+#   202 {"trace_id":"...","status":"pending"}   → poll GET /v1/answers/{trace_id}
+```
+
+gRPC and Telegram are on the roadmap (PRODUCT.md) riding the same engine.
+
+## Router rules (deterministic, editable at runtime)
+
+Shipped: `/uptime /disk /df /memory /free /hostname /kernel /uname /who
+/csv_summary <path> /csv_head <path> [n]`. Rules live in the SQLite
+`rules` table and hot-reload (`AEGIS_RULES_RELOAD`, default 30s):
+
+```bash
+sqlite3 aegisgo.db "INSERT INTO rules (name,pattern,tool,args_template,origin,enabled,created_ts)
+  VALUES ('diskfree', '/diskfree', 'system_command', '{\"command\":\"disk\"}', 'seed', 1, datetime())"
+```
+
+Every LLM fallback is logged as normalized corpus — Phase 3 mines repeated
+shapes into candidate rules (shadow → promote), so spend falls as traffic
+grows. Watch it accumulating:
+
+```bash
+sqlite3 aegisgo.db "SELECT normalized_prompt, COUNT(*) FROM fallback_events GROUP BY 1 ORDER BY 2 DESC"
+```
+
+## Tools
+
+| Tool | Notes |
+|---|---|
+| `read_csv` / `csv_stats` / `read_doc` | sandboxed to `AEGIS_WORKSPACE` (symlink-aware), size-capped |
+| `system_command` | fixed-argv catalog (`uptime df free hostname uname who`) — input picks a key, never argv; process-group kill on timeout |
+| `sql_query` | `database/sql`, parameterized only, **read-only by default** (`AEGIS_SQL_MODE=rw` to unlock); `attach_csvs` turns workspace CSVs into queryable temp tables |
+| + external MCP tools | `AEGIS_MCP_SERVERS="stdio:<cmd> | https://host/mcp"` |
+
+SQL over the sample CSV:
+
+```bash
+AEGIS_LLM=off bin/aegis-agent /csv_head testdata/sample.csv 1
+# or via the LLM: "attach testdata/sample.csv as orders and total qty by shipped"
 ```
 
 ## Configuration (env)
 
 | Variable | Meaning |
 |---|---|
+| `AEGIS_LLM` | `off` = router-only kill switch (no provider credentials needed) |
 | `AEGIS_PROVIDER` | `openai` \| `openai-compat` \| `anthropic` \| `foundry` |
-| `AEGIS_MODEL` | default model id (deployment name for Foundry) |
-| `AEGIS_MODEL_FAST` / `AEGIS_MODEL_SMART` | per-tier models; `--tier fast` picks the cheap one |
+| `AEGIS_MODEL`, `AEGIS_MODEL_FAST/SMART` | default + per-tier models (`--tier fast/smart`) |
 | `OPENAI_API_KEY`, `OPENAI_BASE_URL` | OpenAI creds; base URL enables Ollama/OpenRouter/vLLM |
-| `ANTHROPIC_API_KEY` | Anthropic creds |
-| `FOUNDRY_ENDPOINT` | Foundry project endpoint (auth via `azidentity`) |
-| `AEGIS_WORKSPACE` | root file tools may read from (default: cwd) — security boundary |
-| `AEGIS_MCP_SERVERS` | comma list: `stdio:<command args>` or `https://host/mcp` |
-| `AEGIS_INSTRUCTIONS` | override the system prompt |
-
-## MCP
-
-AegisGo **consumes** MCP servers at startup; every remote tool becomes a
-native agent tool:
-
-```bash
-export AEGIS_MCP_SERVERS="stdio:./bin/mcp-echo-server,https://mcp.example.com/mcp"
-```
-
-Try it with the included example server:
-
-```bash
-go build -o /tmp/mcp-echo ./examples/mcp-echo-server
-AEGIS_MCP_SERVERS="stdio:/tmp/mcp-echo" bin/aegis-agent ...
-# logs: agent ready ... mcp_tools=2 builtin_tools=3
-```
-
-To **expose your own** Go tools as an MCP server for other agents, copy
-`examples/mcp-echo-server/` — it shows the mcp-go server side (tool schemas,
-handlers, stdio transport).
+| `ANTHROPIC_API_KEY`, `FOUNDRY_ENDPOINT` | other providers |
+| `AEGIS_WORKSPACE` | root file tools may read — security boundary |
+| `AEGIS_MCP_SERVERS` | external MCP servers (stdio/HTTP) |
+| `AEGIS_DB_PATH` | embedded SQLite file (audit, rules, answers) |
+| `AEGIS_SQL_DSN` / `AEGIS_SQL_MODE` | sql_query backend / `ro`\|`rw` |
+| `AEGIS_RULES_RELOAD` | rules hot-reload seconds (0 = off) |
+| `AEGIS_ADDR` | serve listen address |
 
 ## Layout & Docs
 
-- `CLAUDE.md` — rules for AI agents working on this repo (architecture map,
-  hard rules, pinned-dependency risks)
-- `PRODUCT.md` — vision, scope, cost strategy, roadmap
-- `WORKFLOW.md` — dev loop, recipes (add a tool / provider / MCP server),
-  Linux deployment
+- `CLAUDE.md` — rules for AI agents on this repo (hard rules: path sandbox,
+  fixed-argv exec, SQL policy, single-writer store, decision_source contract)
+- `PRODUCT.md` — vision, hybrid pipeline, cost strategy, phased roadmap
+  (gRPC, Telegram dual-mode, self-mining router)
+- `WORKFLOW.md` — recipes: add rules/tools/commands/providers, external SQL,
+  operate the audit trail, Linux deploy
 - `deploy/aegis-serve.service` — hardened systemd unit template
-
-`reference/` (gitignored, `make clone-refs`) holds shallow clones of both
-upstream libraries for offline reading.
+- `examples/mcp-echo-server` — the mcp-go server-side pattern
 
 ## Linux Deployment
 
 ```bash
-GOOS=linux GOARCH=amd64 go build -o bin/ ./cmd/...
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/ ./cmd/...
 ```
 
-Copy `deploy/aegis-serve.service` to `/etc/systemd/system/`, set the
-provider env vars, `systemctl enable --now aegis-serve`. See WORKFLOW.md.
+Copy `deploy/aegis-serve.service`, set env in `/etc/aegisgo.env`, done —
+see WORKFLOW.md.
 
 [microsoft/agent-framework-go]: https://github.com/microsoft/agent-framework-go
 [mark3labs/mcp-go]: https://github.com/mark3labs/mcp-go
+[modernc.org/sqlite]: https://gitlab.com/cznic/sqlite
 [Ollama]: https://ollama.com
