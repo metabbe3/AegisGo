@@ -1,0 +1,21 @@
+# Reference clones (shallow, for offline reading only — never built against)
+reference/
+
+# Binaries
+/bin/
+/aegis-agent
+/aegis-serve
+
+# Go
+*.test
+*.out
+coverage.*
+
+# Local env / secrets
+.env
+.env.*
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/

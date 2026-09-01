@@ -1,0 +1,40 @@
+# systemd unit for aegis-serve — copy to /etc/systemd/system/ and adjust
+# User, WorkingDirectory, and the Environment lines to the deployment.
+# Provider/model are env-driven so the same binary serves every environment.
+
+[Unit]
+Description=AegisGo agent service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=aegis
+Group=aegis
+# File tools are sandboxed to this directory.
+WorkingDirectory=/opt/aegisgo/workspace
+# Pick ONE provider block; this example is OpenAI.
+# For a local model instead: provider=openai-compat,
+# OPENAI_BASE_URL=http://localhost:11434/v1 (Ollama), model=llama3.
+Environment=AEGIS_PROVIDER=openai
+Environment=AEGIS_MODEL=gpt-4o-mini
+Environment=AEGIS_MODEL_FAST=gpt-4o-mini
+Environment=AEGIS_MODEL_SMART=gpt-4o
+Environment=AEGIS_WORKSPACE=/opt/aegisgo/workspace
+Environment=AEGIS_ADDR=:8080
+# Environment=AEGIS_MCP_SERVERS=stdio:/usr/local/bin/some-mcp-server
+# Secrets: use an EnvironmentFile readable only by this user.
+EnvironmentFile=-/etc/aegisgo.env
+ExecStart=/opt/aegisgo/bin/aegis-serve
+Restart=on-failure
+RestartSec=3
+
+# Lightweight-by-design hardening.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/aegisgo/workspace
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

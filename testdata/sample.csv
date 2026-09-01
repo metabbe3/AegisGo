@@ -1,0 +1,11 @@
+order_id,customer,ordered_at,item,qty,unit_price,shipped
+1001,Acme Corp,2026-08-01,Widget A,10,9.99,true
+1002,Globex,2026-08-03,Widget B,4,24.50,true
+1003,Initech,2026-08-05,Widget A,25,9.99,false
+1004,Umbrella Ltd,2026-08-11,Sprocket C,2,149.00,true
+1005,Soylent Inc,2026-08-12,Widget B,8,24.50,false
+1006,Hooli,2026-08-15,Widget A,15,9.99,true
+1007,Stark Industries,2026-08-19,Gadget D,1,899.00,false
+1008,Wayne Enterprises,2026-08-21,Sprocket C,6,149.00,true
+1009,Cyberdyne,2026-08-25,Widget A,40,9.99,false
+1010,Duff Corp,2026-08-27,Widget B,12,24.50,true
