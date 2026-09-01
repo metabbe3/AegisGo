@@ -3,7 +3,6 @@ package miner
 import (
 	"context"
 	"regexp"
-	"sync"
 	"testing"
 	"time"
 
@@ -175,13 +174,11 @@ func TestStartMinesPeriodically(t *testing.T) {
 	// Threshold-eligible shape: the loop's first tick must mine it.
 	seedCorpus(t, st, "summarize <path> quickly", "csv_stats", 2)
 
-	// Start's stop closes a channel, so it must fire exactly once — a
-	// second call would panic on double close. sync.Once keeps that true
-	// on every exit path, including t.Fatal mid-test.
+	// stop's idempotence is Start's contract (like store.Close), so the
+	// deferred call only guards the t.Fatal paths.
 	stop := Start(context.Background(), st, Options{Threshold: 2},
 		100*time.Millisecond, nil)
-	var once sync.Once
-	defer once.Do(stop)
+	defer stop()
 
 	var gotName, gotState, gotPattern string
 	var gotEnabled int
@@ -213,8 +210,41 @@ func TestStartMinesPeriodically(t *testing.T) {
 		t.Errorf("pattern = %q, want %q", gotPattern, want)
 	}
 
-	// Ends the loop without hanging or panicking; safe on every path.
-	once.Do(stop)
+	// Double-stop must not panic: cleanup closures legitimately fire from
+	// more than one exit path (e.g. app.Build's error branch and the
+	// caller's defer), so Start guards close(done) with a sync.Once.
+	stop()
+	stop()
+}
+
+func TestStartStopsOnContextCancel(t *testing.T) {
+	st, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	// Threshold-eligible shape: one tick would mine it.
+	seedCorpus(t, st, "summarize <path> quickly", "csv_stats", 2)
+
+	// A canceled boot context must end the loop before the first tick
+	// fires: 300ms at a 100ms interval is three missed ticks, so a mined
+	// rule can only appear if the loop ignored ctx and kept ticking.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	stop := Start(ctx, st, Options{Threshold: 2}, 100*time.Millisecond, nil)
+	defer stop()
+
+	if waitFor(t, 300*time.Millisecond, func() bool {
+		var n int
+		if err := st.QueryRow(context.Background(),
+			`SELECT COUNT(*) FROM rules WHERE name LIKE 'mined_%'`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n > 0
+	}) {
+		t.Error("mining loop ran a pass after ctx was canceled")
+	}
 }
 
 func TestMineDefaultThreshold(t *testing.T) {

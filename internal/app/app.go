@@ -130,10 +130,14 @@ func Build(ctx context.Context, cfg config.Config, tier config.Tier,
 			cleanup()
 			return nil, nil, err
 		}
+		// Mirror the base cleanup plus stopTelegram. stopMiner() must stay:
+		// without it the miner goroutine keeps ticking and st.Close() below
+		// can yank the store out from under an in-flight Mine.
 		cleanup = func() {
 			if stopTelegram != nil {
 				stopTelegram()
 			}
+			stopMiner()
 			stopReload()
 			releaseMCP()
 			st.Close()
