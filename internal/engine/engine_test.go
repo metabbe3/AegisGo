@@ -440,12 +440,15 @@ func TestFinishRouterToolError(t *testing.T) {
 
 	_, ctx := trace.New(context.Background(), "")
 	res := e.Run(ctx, "/csv_head nonexistent.csv")
-	// The rule matched but the tool failed. The audit row carries the router
-	// source with outcome=error; the returned Result reports the tool's
-	// failure text (and leaves DecisionSource empty on this arm).
+	// The rule matched but the tool failed. Both the audit row and the returned
+	// Result carry the router source: a tool failure underneath a matched rule
+	// is still a router decision (Hard Rule 6).
 	if !strings.Contains(res.Answer, `command "csv_head" failed`) ||
 		!strings.Contains(res.Answer, `path "nonexistent.csv" not found`) {
 		t.Errorf("answer = %q, want the tool failure surfaced", res.Answer)
+	}
+	if res.DecisionSource != store.SourceRouter {
+		t.Errorf("source = %q, want regex_router on the tool-error arm", res.DecisionSource)
 	}
 	if len(fake.prompts) != 0 {
 		t.Errorf("a failed tool is still a router hit; LLM saw %d prompts", len(fake.prompts))

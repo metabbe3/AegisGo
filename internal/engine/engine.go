@@ -294,6 +294,9 @@ func (e *Engine) finishRouter(ctx context.Context, d router.Decision, prompt, tr
 	res := Result{RuleID: d.RuleID, TraceID: traceID, LatencyMS: ms(time.Since(start))}
 	if d.Err != nil {
 		res.Answer = fmt.Sprintf("command %q failed: %s", d.RuleID, d.Err)
+		// The rule matched; a tool failing underneath it is still a router
+		// decision (Hard Rule 6), so Result reports the source like the audit row.
+		res.DecisionSource = store.SourceRouter
 		e.audit(ctx, store.AuditEvent{
 			TraceID: traceID, DecisionSource: store.SourceRouter, RuleID: d.RuleID,
 			Prompt: prompt, LatencyMS: res.LatencyMS, Outcome: "error",
