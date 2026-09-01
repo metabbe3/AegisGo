@@ -390,7 +390,9 @@ s2() {
   }
   wait_for "hot reload picks up /search within one 2s interval" 15 s2_search_ok || return 1
   http_post "$url/v1/agent/run" '{"prompt":"/search sales alice"}' "$o-search.json" || return 1
-  assert_contains "$o-search.json" 'rows_returned\": 1' "/search returns exactly one row" || return 1
+  # Trailing comma anchors the count: SQLOutput always marshals rows_returned
+  # before truncated, so `1,` cannot prefix-match `12,`.
+  assert_contains "$o-search.json" 'rows_returned\": 1,' "/search returns exactly one row" || return 1
   assert_contains "$o-search.json" 'Widget' "/search returns alice's product" || return 1
   assert_contains "$o-search.json" '\"42\"' "/search returns alice's qty" || return 1
 
@@ -425,7 +427,9 @@ s3() {
   curl -s -D "$o-sync.hdr" -o "$o-sync.json" \
     -H 'Content-Type: application/json' -H 'X-Trace-Id: e2e-s3-sync' \
     -d '{"prompt":"/hostname"}' "$url/v1/agent/run" || return 1
-  assert_contains "$o-sync.hdr" "200" "sync run answers 200" || return 1
+  # Status line, not a bare "200" (which Content-Length or a header value
+  # could satisfy); curl -D writes it as the first header-dump line.
+  assert_matches "$o-sync.hdr" '^HTTP/1\.1 200' "sync run answers HTTP 200" || return 1
   assert_contains "$o-sync.hdr" "e2e-s3-sync" "X-Trace-Id supplied by the caller is echoed" || return 1
   assert_contains "$o-sync.json" '"decision_source":"regex_router"' \
     "sync run deflected to the regex router" || return 1
@@ -823,6 +827,9 @@ s11() {
 
   # A 0.5b model doing tool calls over OpenAI-compat gets room (240s),
   # bounded by run_watchdog so a hang fails loudly instead of stalling CI.
+  # The prompt pins a marker ('e2e-tool-call'): the echo tool returns its
+  # message verbatim, so a compliant final answer quotes the marker — the
+  # stage proves the Ollama LLM really drove the MCP echo tool end-to-end.
   run_watchdog 240 env \
     AEGIS_LLM=on \
     AEGIS_PROVIDER=openai-compat \
@@ -832,7 +839,7 @@ s11() {
     AEGIS_MCP_SERVERS="stdio:$REPO/bin/mcp-echo-server" \
     AEGIS_DB_PATH="$db" AEGIS_WORKSPACE="$WS" AEGIS_MINER_INTERVAL=0 \
     "$REPO/bin/aegis-agent" \
-    "Please call the echo tool with the exact message 'e2e-tool-call' and tell me what it returned." \
+    "Call the echo tool with the exact message 'e2e-tool-call', then reply with the exact text the tool returned." \
     >"$o-llm.out" 2>"$o-llm.err" || { bad "LLM run failed/timed out"; tail -5 "$o-llm.err"; return 1; }
 
   [ -s "$o-llm.out" ] || { bad "LLM answer is empty"; cat "$o-llm.err"; return 1; }
@@ -843,8 +850,24 @@ s11() {
   assert_ge "$n_llm" 1 "audit row records decision_source=llm" || return 1
   n_fb=$(sq "$db" "SELECT COUNT(*) FROM fallback_events")
   assert_ge "$n_fb" 1 "fallback_events row persisted for the mining corpus" || return 1
+
+  # The framework's own tool-call record is the authoritative proof: the
+  # engine writes tools_used from the FunctionCallContent names it observed,
+  # not from anything the model merely claims in prose. tools_used members
+  # are comma-joined, so wrapping in commas makes the membership test
+  # boundary-safe ("echo" cannot match "read_doc,echoplexus").
   tools=$(sq "$db" "SELECT COALESCE(GROUP_CONCAT(DISTINCT tools_used),'') FROM fallback_events")
-  note "tools_used by the LLM: ${tools:-(none)}"
+  if [ -z "$tools" ]; then
+    bad "LLM invoked no tools — expected the MCP echo tool (fallback_events.tools_used is empty)"
+    sed -n '1,5p' "$o-llm.out" | sed 's/^/        | /'
+    return 1
+  fi
+  case ",$tools," in
+    *,echo,*) note "LLM invoked the MCP echo tool (tools_used: $tools)" ;;
+    *) bad "MCP echo tool was NOT invoked — tools_used='$tools'"; return 1 ;;
+  esac
+  assert_contains "$o-llm.out" "e2e-tool-call" \
+    "answer quotes the echoed marker 'e2e-tool-call'" || return 1
 }
 
 # =====================================================================
@@ -879,11 +902,16 @@ MD
 main() {
   printf 'aegisgo e2e — %s\n  repo %s\n  work %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$REPO" "$WORK"
 
-  local busy="" p
+  local busy="" hint="" p
   for p in $P_HTTP $P_GRPC $P_AUX $P_S7WEB $P_TG; do
     if port_busy "$p"; then busy="$busy $p"; fi
   done
-  [ -z "$busy" ] || die "ports busy:$busy — a previous e2e run may still be alive (lsof -nP -iTCP:$busy -sTCP:LISTEN)"
+  # lsof takes one port per -iTCP flag; build a paste-ready command that
+  # names each busy port (multiple -i options are ORed).
+  [ -z "$busy" ] || {
+    for p in $busy; do hint="$hint -iTCP:$p"; done
+    die "ports busy:$busy — a previous e2e run may still be alive (lsof -nP$hint -sTCP:LISTEN)"
+  }
 
   make_workspace
 
