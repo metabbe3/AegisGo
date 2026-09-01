@@ -52,14 +52,15 @@ safety) is already done.
 | Kill switch | `AEGIS_LLM=off` — router-only mode, zero credentials |
 | MCP | agent consumes external MCP servers (stdio + streamable HTTP) via mark3labs/mcp-go |
 | Serving | REST: sync + `?async=1` (202 + poll), /healthz, /readyz; systemd unit |
-| Durable substrate | embedded SQLite: audit trail, rules, fallback corpus, answers; single-writer batcher |
+| **Telegram** | dual-transport (webhook or long-poll, one dispatcher), dormant until `AEGIS_TELEGRAM_TOKEN`; at-least-once + idempotent replies on update_id; placeholder-then-edit UX; chat allowlist + per-chat rate limit |
+| Durable substrate | embedded SQLite: audit trail, rules, fallback corpus, answers, telegram inbox; single-writer batcher |
 
 ## Scope Boundaries
 
 **In**: single-agent services, file/SQL/system tools, MCP client, REST
 serving, multi-provider config, hybrid routing with audit.
 
-**Out (for now)**: gRPC, Telegram, streaming, multi-agent orchestration,
+**Out (for now)**: gRPC, streaming, multi-agent orchestration,
 conversation persistence, REST authn — see roadmap.
 
 ## Cost Strategy
@@ -73,18 +74,11 @@ Three stacked mechanisms:
 
 ## Roadmap
 
-### Phase 2 — more interfaces
+### Phase 2 — remaining interfaces
 - **gRPC + protobuf contract** (`.proto`, protoc codegen in Makefile) so
   PHP/Python/Java services call the same engine; async semantics map to the
-  existing answer store (Run + AnswerPoll / server-stream).
-- **Telegram dual-mode**: one dispatcher, two transports — webhook (public
-  TLS ingress) and getUpdates long-poll (NAT'd boxes, zero ingress). Design
-  constraints locked in from the ideation pass: ack-then-process (Telegram
-  retries slow webhooks → duplicate side effects), dedupe on monotonically
-  increasing update_id with a persisted high-water mark (replay protection),
-  at-least-once delivery + idempotent replies, chat allowlist, per-chat rate
-  limits, placeholder-then-editMessageText UX. First build step is the
-  crash-window test (high-water vs process vs send ordering).
+  existing answer store (Run + AnswerPoll / server-stream). Telegram is
+  shipped (see capabilities above); gRPC is the remaining interface.
 
 ### Phase 3 — the self-optimizing router
 - **Rule miner**: cluster `fallback_events` by normalized prompt shape;

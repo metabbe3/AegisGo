@@ -234,15 +234,37 @@ func (s *Store) Exec(ctx context.Context, query string, args ...any) error {
 	return s.execSync(ctx, query, args...)
 }
 
+// ExecResult runs a synchronous write outside the batcher and reports rows
+// affected. For guarded atomic claims (e.g. the Telegram inbox's
+// claim-then-send): the rowcount IS the answer, so it must be exact.
+// WAL + busy_timeout keep this safe alongside the batcher.
+func (s *Store) ExecResult(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	return s.db.ExecContext(ctx, query, args...)
+}
+
 // migrate creates tables idempotently, versioned by PRAGMA user_version.
 func (s *Store) migrate() error {
 	var version int
 	if err := s.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		return fmt.Errorf("reading user_version: %w", err)
 	}
-	if version >= 1 {
-		return nil
+	if version < 1 {
+		if err := s.migrateV1(); err != nil {
+			return err
+		}
+		version = 1
 	}
+	if version < 2 {
+		if err := s.migrateV2(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// migrateV1 is the Phase-1 schema: audit trail, fallback corpus, answers,
+// router rules.
+func (s *Store) migrateV1() error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -297,6 +319,41 @@ func (s *Store) migrate() error {
 		if _, err := tx.Exec(stmt); err != nil {
 			tx.Rollback()
 			return fmt.Errorf("migrating to v1: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+// migrateV2 adds the Telegram interface substrate: the durable inbox
+// (idempotent on update_id — the at-least-once delivery anchor) and a small
+// kv table for transport state like the long-poll high-water mark.
+func (s *Store) migrateV2() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS telegram_inbox (
+			update_id INTEGER PRIMARY KEY,
+			chat_id INTEGER NOT NULL,
+			text TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'pending',
+			attempts INTEGER NOT NULL DEFAULT 0,
+			replied_at TEXT,
+			received_ts TEXT NOT NULL,
+			processed_ts TEXT
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_tginbox_status ON telegram_inbox(status)`,
+		`CREATE TABLE IF NOT EXISTS kv_state (
+			k TEXT PRIMARY KEY,
+			v TEXT NOT NULL
+		)`,
+		`PRAGMA user_version = 2`,
+	}
+	for _, stmt := range stmts {
+		if _, err := tx.Exec(stmt); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("migrating to v2: %w", err)
 		}
 	}
 	return tx.Commit()

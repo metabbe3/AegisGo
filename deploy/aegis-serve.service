@@ -27,6 +27,12 @@ Environment=AEGIS_ADDR=:8080
 Environment=AEGIS_DB_PATH=/opt/aegisgo/state/aegisgo.db
 Environment=AEGIS_SQL_MODE=ro
 Environment=AEGIS_RULES_RELOAD=30
+# Telegram interface — dormant until the token is set.
+# Long-poll mode (zero ingress) needs only these two:
+#Environment=AEGIS_TELEGRAM_TOKEN=
+#Environment=AEGIS_TELEGRAM_CHATS=
+# Webhook mode (public TLS ingress) additionally:
+#Environment=AEGIS_TELEGRAM_WEBHOOK_URL=https://bot.example.com
 # Environment=AEGIS_MCP_SERVERS=stdio:/usr/local/bin/some-mcp-server
 # Secrets: use an EnvironmentFile readable only by this user.
 EnvironmentFile=-/etc/aegisgo.env

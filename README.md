@@ -57,7 +57,39 @@ curl -s -X POST 'localhost:8080/v1/agent/run?async=1' -d '{"prompt":"hard questi
 #   202 {"trace_id":"...","status":"pending"}   → poll GET /v1/answers/{trace_id}
 ```
 
-gRPC and Telegram are on the roadmap (PRODUCT.md) riding the same engine.
+gRPC is on the roadmap (PRODUCT.md) riding the same engine.
+
+## Telegram (built in, dormant until enabled)
+
+The full Telegram interface ships in the binary — **one env var activates it**:
+
+```bash
+export AEGIS_TELEGRAM_TOKEN=123456:AB…       # from @BotFather
+export AEGIS_TELEGRAM_CHATS=424242            # your numeric chat id (allowlist)
+AEGIS_LLM=off bin/aegis-serve                 # even router-only bots work
+```
+
+Transport picks itself: `AEGIS_TELEGRAM_WEBHOOK_URL` set → webhook mode
+(Telegram posts to `<url>/telegram/webhook`, secret-header validated);
+unset → `getUpdates` long-polling (works behind NAT, zero ingress).
+No token → the subsystem logs one line and stays out of the way.
+
+Behavior: router commands (`/uptime`, `/csv_head …`) answer instantly and
+free with a `[regex_router via rule · Nms]` header; anything else goes to
+the LLM with a `…` placeholder edited into the answer. `/help` and `/rules`
+work in-chat. Delivery is at-least-once with idempotent replies keyed on
+`update_id` — webhook retries and crash replays never double-send. Unknown
+chats are skipped, never answered. Ops:
+
+```bash
+sqlite3 aegisgo.db "SELECT status, COUNT(*) FROM telegram_inbox GROUP BY 1"
+sqlite3 aegisgo.db "SELECT decision_source, COUNT(*) FROM audit_events WHERE interface='telegram' GROUP BY 1"
+```
+
+Other knobs: `AEGIS_TELEGRAM_MODE` (auto|poll|webhook),
+`AEGIS_TELEGRAM_WEBHOOK_SECRET` (else generated per boot),
+`AEGIS_TELEGRAM_WORKERS` (default 4), `AEGIS_TELEGRAM_API_BASE` (tests /
+self-hosted Bot API).
 
 ## Router rules (deterministic, editable at runtime)
 
@@ -109,6 +141,9 @@ AEGIS_LLM=off bin/aegis-agent /csv_head testdata/sample.csv 1
 | `AEGIS_SQL_DSN` / `AEGIS_SQL_MODE` | sql_query backend / `ro`\|`rw` |
 | `AEGIS_RULES_RELOAD` | rules hot-reload seconds (0 = off) |
 | `AEGIS_ADDR` | serve listen address |
+| `AEGIS_TELEGRAM_TOKEN` | enables the Telegram interface (empty = dormant) |
+| `AEGIS_TELEGRAM_CHATS` | chat allowlist (numeric IDs); empty denies all |
+| `AEGIS_TELEGRAM_WEBHOOK_URL` / `_SECRET` / `_MODE` / `_WORKERS` / `_API_BASE` | transport tuning |
 
 ## Layout & Docs
 

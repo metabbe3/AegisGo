@@ -54,8 +54,12 @@ func serve(ctx context.Context, tierFlag string) error {
 	defer cleanup()
 
 	srv := &http.Server{
-		Addr:              cfg.Addr,
-		Handler:           server.Handler(server.Deps{Engine: a.Engine, Answers: a.Store, Readines: a.Store, Logger: logger}),
+		Addr: cfg.Addr,
+		Handler: server.Handler(server.Deps{
+			Engine: a.Engine, Answers: a.Store, Readines: a.Store,
+			Webhook: a.Webhook, // nil unless Telegram runs in webhook mode
+			Logger:  logger,
+		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

@@ -31,7 +31,8 @@ internal/tools           common Tool interface + read_csv, csv_stats, read_doc,
                          system_command (fixed-argv catalog), sql_query (ro by default)
 internal/store           embedded SQLite: audit trail, rules table, fallback corpus,
                          async answers; single-writer batcher
-internal/server          REST: /healthz /readyz /v1/agent/run (sync|?async=1) /v1/answers/{id}
+internal/server          REST: /healthz /readyz /v1/agent/run (sync|?async=1) /v1/answers/{id}, optional webhook mount
+internal/telegram        Telegram interface: stdlib Bot API client, dispatcher, durable inbox, webhook + long-poll transports
 internal/mcpclient       mark3labs/mcp-go client + adapter to framework tools
 internal/provider        env-switched agent factory (openai | openai-compat | anthropic | foundry)
 internal/trace           trace-ID minting/propagation (joins logs, audit rows, answers)
@@ -81,6 +82,13 @@ router keeps serving with zero credentials.
    shape (e.g. `\d+`).
 10. **Bounded tool output.** Cap anything a tool returns (row caps, byte
     caps) — unbounded reads blow the model context and RAM.
+11. **Telegram delivery invariants.** Webhook acks BEFORE processing
+    (ack-then-process); replies are claimed atomically on update_id
+    (claim-then-send — see inbox.go); the long-poll offset advances only
+    past processed rows (process-then-ack). Two tests pin these
+    (TestCrashWindowExactlyOneReply, TestOffsetOrdering) — a change that
+    breaks them is wrong, not the tests. Unknown chats are never answered.
+    The Bot API client stays stdlib-only; do not add a Telegram SDK.
 
 ## Pinned Dependencies & Known Risks
 

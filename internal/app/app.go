@@ -7,6 +7,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"strings"
 	"time"
 
 	"aegisgo/internal/config"
@@ -14,8 +16,11 @@ import (
 	"aegisgo/internal/mcpclient"
 	"aegisgo/internal/provider"
 	"aegisgo/internal/router"
+	"aegisgo/internal/server"
 	"aegisgo/internal/store"
+	"aegisgo/internal/telegram"
 	"aegisgo/internal/tools"
+	"aegisgo/internal/trace"
 )
 
 // App is a fully wired hybrid agent.
@@ -23,6 +28,9 @@ type App struct {
 	Engine *engine.Engine
 	Store  *store.Store
 	Config config.Config
+	// Webhook is non-nil when the Telegram interface runs in webhook mode;
+	// mount it on the HTTP server (cmd wiring passes it to server.Deps).
+	Webhook http.Handler
 }
 
 // Build opens the store and assembles the engine. The returned cleanup
@@ -102,6 +110,30 @@ func Build(ctx context.Context, cfg config.Config, tier config.Tier,
 		releaseMCP()
 		st.Close()
 	}
+
+	// Telegram interface: fully built, dormant until a token is set.
+	eng := &engine.Engine{Router: rt, LLM: llm, Store: st, IFace: iface, Model: model}
+	var webhook http.Handler
+	var stopTelegram func()
+	if cfg.TelegramEnabled() {
+		var err error
+		webhook, stopTelegram, err = startTelegram(ctx, cfg, eng, st, rt, logger)
+		if err != nil {
+			cleanup()
+			return nil, nil, err
+		}
+		cleanup = func() {
+			if stopTelegram != nil {
+				stopTelegram()
+			}
+			stopReload()
+			releaseMCP()
+			st.Close()
+		}
+	} else {
+		logger.Info("telegram disabled — set AEGIS_TELEGRAM_TOKEN (+ AEGIS_TELEGRAM_CHATS) to enable")
+	}
+
 	logger.Info("engine ready",
 		"iface", iface,
 		"llm", !cfg.LLMDisabled(),
@@ -111,10 +143,77 @@ func Build(ctx context.Context, cfg config.Config, tier config.Tier,
 		"builtin_tools", len(reg.All()),
 		"mcp_tools", len(mcpTools),
 		"workspace", cfg.WorkspaceDir(),
+		"telegram", cfg.TelegramEnabled(),
 	)
 	return &App{
-		Engine: &engine.Engine{Router: rt, LLM: llm, Store: st, IFace: iface, Model: model},
-		Store:  st,
-		Config: cfg,
+		Engine:  eng,
+		Store:   st,
+		Config:  cfg,
+		Webhook: webhook,
 	}, cleanup, nil
+}
+
+// startTelegram boots the Telegram interface: client → inbox → dispatcher
+// → workers, then the chosen transport (webhook or long-poll). A bad token
+// fails startup loudly; an empty chat allowlist warns but boots (the bot
+// will skip everything until configured — secure default).
+func startTelegram(ctx context.Context, cfg config.Config, eng *engine.Engine,
+	st *store.Store, rt *router.Router, logger *slog.Logger) (http.Handler, func(), error) {
+
+	client := telegram.NewHTTPClient(cfg.TelegramToken, cfg.TelegramAPIBase)
+	botName, err := client.GetMe(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("telegram: token rejected (getMe): %w", err)
+	}
+	if len(cfg.TelegramChats) == 0 {
+		logger.Warn("telegram enabled but AEGIS_TELEGRAM_CHATS is empty — " +
+			"all updates will be skipped until the allowlist is set")
+	}
+
+	inbox := telegram.NewInbox(st)
+	dispatcher := telegram.NewDispatcher(eng, client, inbox, cfg.TelegramChats,
+		func() []string {
+			var lines []string
+			for _, d := range rt.RuleDefs() {
+				lines = append(lines, fmt.Sprintf("%s → %s → %s", d.Name, d.Pattern, d.Tool))
+			}
+			return lines
+		}, logger)
+
+	workers := max(1, cfg.TelegramWorkers)
+	pool := telegram.NewWorkerPool(inbox, workers, time.Second, dispatcher.Process, logger)
+
+	// The transport outlives the boot context (it serves until shutdown).
+	tgCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	pool.Start(tgCtx)
+
+	var webhook http.Handler
+	if cfg.TelegramUseWebhook() {
+		if cfg.TelegramWebhookURL == "" {
+			cancel()
+			return nil, nil, fmt.Errorf("telegram: webhook mode needs AEGIS_TELEGRAM_WEBHOOK_URL")
+		}
+		secret := cfg.TelegramWebhookSecret
+		if secret == "" {
+			// Per-boot secret: always enforced, rotation = restart.
+			secret, _ = trace.New(context.Background(), "")
+		}
+		publicURL := strings.TrimSuffix(cfg.TelegramWebhookURL, "/") + server.WebhookPath
+		if err := client.SetWebhook(tgCtx, publicURL, secret); err != nil {
+			cancel()
+			return nil, nil, fmt.Errorf("telegram: setWebhook failed: %w", err)
+		}
+		webhook = telegram.NewWebhookHandler(secret, inbox, pool, logger)
+		logger.Info("telegram: webhook transport active", "bot", botName, "url", publicURL)
+	} else {
+		loop := telegram.NewPollLoop(client, inbox, pool, logger)
+		go loop.Run(tgCtx)
+		logger.Info("telegram: long-poll transport active", "bot", botName)
+	}
+
+	stop := func() {
+		pool.Stop()
+		cancel()
+	}
+	return webhook, stop, nil
 }

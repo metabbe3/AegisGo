@@ -76,10 +76,37 @@ server is unreachable.
 3. Smoke-test with real creds in a shell (`AEGIS_*`), never in committed
    tests.
 
+### Enable the Telegram bot
+
+Everything ships built-in; activation is env-only:
+
+```bash
+export AEGIS_TELEGRAM_TOKEN=…            # @BotFather
+export AEGIS_TELEGRAM_CHATS=424242       # numeric chat IDs, comma-separated
+# webhook mode (public TLS ingress):
+export AEGIS_TELEGRAM_WEBHOOK_URL=https://bot.example.com
+# else: long-poll mode (zero ingress, works behind NAT)
+```
+
+A bad token fails boot loudly (getMe). Empty allowlist boots but skips
+everything (WARN at startup) — set the allowlist before pointing users at
+it. To rotate the webhook secret: restart with a new
+`AEGIS_TELEGRAM_WEBHOOK_SECRET` (or none — a fresh one is generated and
+re-registered each boot). Inbox ops:
+
+```bash
+sqlite3 aegisgo.db "SELECT status, COUNT(*) FROM telegram_inbox GROUP BY 1"
+sqlite3 aegisgo.db "SELECT update_id, status FROM telegram_inbox ORDER BY update_id DESC LIMIT 10"
+```
+
+Dev/demo without a real bot: point `AEGIS_TELEGRAM_API_BASE` at a fake
+Bot API and POST updates to `/telegram/webhook` yourself (see
+internal/telegram/telegram_test.go for the shapes).
+
 ### Operate the audit trail
 
 ```bash
-sqlite3 aegisgo.db "SELECT decision_source, COUNT(*), AVG(latency_ms) FROM audit_events GROUP BY 1"
+sqlite3 aegisgo.db "SELECT interface, decision_source, COUNT(*), AVG(latency_ms) FROM audit_events GROUP BY 1,2"
 sqlite3 aegisgo.db "SELECT normalized_prompt, COUNT(*) c FROM fallback_events GROUP BY 1 ORDER BY c DESC LIMIT 10"  # Phase-3 mining preview
 ```
 

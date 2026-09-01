@@ -19,8 +19,9 @@ const (
 
 // Interface names recorded on audit rows.
 const (
-	IFaceCLI  = "cli"
-	IFaceREST = "rest"
+	IFaceCLI      = "cli"
+	IFaceREST     = "rest"
+	IFaceTelegram = "telegram"
 )
 
 // AuditEvent is one row of the decision trail.

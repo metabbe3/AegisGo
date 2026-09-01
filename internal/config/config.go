@@ -88,6 +88,27 @@ type Config struct {
 
 	// RulesReloadSecs is the rules-table hot-reload interval; 0 disables.
 	RulesReloadSecs int
+
+	// TelegramToken enables the Telegram interface; empty (default) keeps
+	// the whole subsystem dormant — built, wired, and one env var away.
+	TelegramToken string
+	// TelegramChats is the chat allowlist (numeric IDs). Empty denies all
+	// processing (secure default); set it when enabling the bot.
+	TelegramChats []int64
+	// TelegramMode is "auto" (default: webhook when a URL is set, else
+	// long-poll), "poll", or "webhook".
+	TelegramMode string
+	// TelegramWebhookURL is the public HTTPS webhook endpoint. Required in
+	// webhook mode.
+	TelegramWebhookURL string
+	// TelegramWebhookSecret authenticates webhook deliveries; generated at
+	// boot when empty.
+	TelegramWebhookSecret string
+	// TelegramWorkers bounds the dispatcher's worker pool (default 4).
+	TelegramWorkers int
+	// TelegramAPIBase overrides the Bot API base URL (tests, self-hosted
+	// bot API servers); empty = api.telegram.org.
+	TelegramAPIBase string
 }
 
 // Load reads configuration from the environment and applies defaults.
@@ -111,7 +132,45 @@ func Load() Config {
 		SQLDSN:          strings.TrimSpace(os.Getenv("AEGIS_SQL_DSN")),
 		SQLMode:         envOr("AEGIS_SQL_MODE", "ro"),
 		RulesReloadSecs: AtoiDefault(os.Getenv("AEGIS_RULES_RELOAD"), 30),
+
+		TelegramToken:         strings.TrimSpace(os.Getenv("AEGIS_TELEGRAM_TOKEN")),
+		TelegramChats:         parseInt64List(os.Getenv("AEGIS_TELEGRAM_CHATS")),
+		TelegramMode:          envOr("AEGIS_TELEGRAM_MODE", "auto"),
+		TelegramWebhookURL:    strings.TrimSpace(os.Getenv("AEGIS_TELEGRAM_WEBHOOK_URL")),
+		TelegramWebhookSecret: strings.TrimSpace(os.Getenv("AEGIS_TELEGRAM_WEBHOOK_SECRET")),
+		TelegramWorkers:       AtoiDefault(os.Getenv("AEGIS_TELEGRAM_WORKERS"), 4),
+		TelegramAPIBase:       strings.TrimSpace(os.Getenv("AEGIS_TELEGRAM_API_BASE")),
 	}
+}
+
+// TelegramEnabled reports whether the Telegram interface should boot.
+func (c Config) TelegramEnabled() bool { return c.TelegramToken != "" }
+
+// TelegramUseWebhook resolves the transport choice: explicit mode wins,
+// auto picks webhook when a public URL is configured, else long-poll.
+func (c Config) TelegramUseWebhook() bool {
+	switch c.TelegramMode {
+	case "webhook":
+		return true
+	case "poll":
+		return false
+	default: // auto
+		return c.TelegramWebhookURL != ""
+	}
+}
+
+// parseInt64List parses a comma-separated list of integers.
+func parseInt64List(s string) []int64 {
+	var out []int64
+	for _, part := range strings.Split(s, ",") {
+		if part = strings.TrimSpace(part); part == "" {
+			continue
+		}
+		if v, err := strconv.ParseInt(part, 10, 64); err == nil {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // LLMDisabled reports whether the LLM fallback kill switch is on.

@@ -17,6 +17,10 @@ import (
 	"aegisgo/internal/trace"
 )
 
+// WebhookPath is where Deps.Webhook mounts. Named for Telegram (the only
+// webhook transport today) but the handler is opaque to this package.
+const WebhookPath = "/telegram/webhook"
+
 // Engine is the slice of *engine.Engine the HTTP layer needs.
 type Engine interface {
 	Run(ctx context.Context, prompt string) engine.Result
@@ -39,7 +43,11 @@ type Deps struct {
 	Engine   Engine
 	Answers  AnswerStore
 	Readines Readiness // optional; nil skips the deep check
-	Logger   *slog.Logger
+	// Webhook, when non-nil, is mounted at POST /telegram/webhook (the
+	// handler itself is built by internal/telegram; the server stays
+	// transport-agnostic).
+	Webhook http.Handler
+	Logger  *slog.Logger
 }
 
 // Handler builds the HTTP routes.
@@ -80,6 +88,10 @@ func Handler(d Deps) http.Handler {
 	mux.HandleFunc("GET /v1/answers/{trace}", func(w http.ResponseWriter, r *http.Request) {
 		getAnswer(w, r, d)
 	})
+
+	if d.Webhook != nil {
+		mux.Handle("POST "+WebhookPath, d.Webhook)
+	}
 
 	return traceMiddleware(d.Logger, mux)
 }

@@ -36,10 +36,19 @@ type Engine struct {
 	Router *router.Router
 	LLM    LLMRunner // nil => AEGIS_LLM=off: misses return fast
 	Store  *store.Store
-	// IFace labels audit rows ("cli", "rest", …).
+	// IFace labels audit rows ("cli", "rest", …) — the engine's default.
+	// Interfaces sharing one engine override per call via WithIFace.
 	IFace string
 	// Model names the LLM on audit rows ("" when disabled).
 	Model string
+}
+
+type ifaceKey struct{}
+
+// WithIFace labels the run's audit rows with the calling interface (e.g.
+// store.IFaceTelegram) regardless of which engine instance serves it.
+func WithIFace(ctx context.Context, iface string) context.Context {
+	return context.WithValue(ctx, ifaceKey{}, iface)
 }
 
 // Run executes the hybrid pipeline for one prompt. The ctx must carry a
@@ -118,7 +127,11 @@ func (e *Engine) audit(ctx context.Context, ev store.AuditEvent) {
 		return
 	}
 	if ev.Interface == "" {
-		ev.Interface = e.IFace
+		if v, ok := ctx.Value(ifaceKey{}).(string); ok && v != "" {
+			ev.Interface = v
+		} else {
+			ev.Interface = e.IFace
+		}
 	}
 	e.Store.Audit(ctx, ev)
 }
