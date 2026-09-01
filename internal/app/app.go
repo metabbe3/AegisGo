@@ -14,6 +14,7 @@ import (
 	"aegisgo/internal/config"
 	"aegisgo/internal/engine"
 	"aegisgo/internal/mcpclient"
+	"aegisgo/internal/miner"
 	"aegisgo/internal/provider"
 	"aegisgo/internal/router"
 	"aegisgo/internal/server"
@@ -81,6 +82,12 @@ func Build(ctx context.Context, cfg config.Config, tier config.Tier,
 	stopReload := router.StartHotReload(rt, st,
 		time.Duration(cfg.RulesReloadSecs)*time.Second, logger)
 
+	// Self-mining: fallback corpus → shadow rules → promotion via the
+	// engine's tool-choice comparison. Promotion bar from config.
+	engine.PromoteAfter = max(1, cfg.MinerPromoteAfter)
+	stopMiner := miner.Start(ctx, st, miner.Options{Threshold: cfg.MinerThreshold},
+		time.Duration(cfg.MinerIntervalSecs)*time.Second, logger)
+
 	// Provider config only matters when the LLM fallback is switched on;
 	// AEGIS_LLM=off boots a router-only agent with zero credentials.
 	var llm engine.LLMRunner
@@ -106,6 +113,7 @@ func Build(ctx context.Context, cfg config.Config, tier config.Tier,
 	}
 
 	cleanup := func() {
+		stopMiner()
 		stopReload()
 		releaseMCP()
 		st.Close()

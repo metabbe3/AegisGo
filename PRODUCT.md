@@ -51,49 +51,40 @@ safety) is already done.
 | Cost tiers | `AEGIS_MODEL_FAST` / `AEGIS_MODEL_SMART` + `--tier` |
 | Kill switch | `AEGIS_LLM=off` — router-only mode, zero credentials |
 | MCP | agent consumes external MCP servers (stdio + streamable HTTP) via mark3labs/mcp-go |
-| Serving | REST: sync + `?async=1` (202 + poll), /healthz, /readyz; systemd unit |
+| Serving | REST (sync + async-poll + **SSE streaming** + /stats), **gRPC** (Run/RunAsync/GetAnswer/Ready + health + reflection); systemd unit |
 | **Telegram** | dual-transport (webhook or long-poll, one dispatcher), dormant until `AEGIS_TELEGRAM_TOKEN`; at-least-once + idempotent replies on update_id; placeholder-then-edit UX; chat allowlist + per-chat rate limit |
-| Durable substrate | embedded SQLite: audit trail, rules, fallback corpus, answers, telegram inbox; single-writer batcher |
+| **Self-mining rules** | fallback corpus → shadow rules (tool-choice comparison) → auto-promotion / auto-demotion; 1% permanent sampling on promoted rules |
+| Admin | `aegisctl` — rules list/mine/promote/demote, stats, replay |
+| Durable substrate | embedded SQLite: audit trail, rules + lifecycle, fallback corpus, shadow events, answers, telegram inbox; single-writer batcher |
 
 ## Scope Boundaries
 
 **In**: single-agent services, file/SQL/system tools, MCP client, REST
 serving, multi-provider config, hybrid routing with audit.
 
-**Out (for now)**: gRPC, streaming, multi-agent orchestration,
-conversation persistence, REST authn — see roadmap.
+**Out (for now)**: authentication, multi-agent orchestration, conversation
+persistence — see roadmap.
 
 ## Cost Strategy
 
-Three stacked mechanisms:
+Three stacked mechanisms, all shipped:
 
 1. **Route around the model** — every rule hit is $0 and ~0ms.
 2. **Tier the fallback** — fast model for routine, smart model when needed.
-3. **Mine the misses** (Phase 3) — repeated fallback shapes become rules, so
-   LLM spend falls as usage grows.
+3. **Mine the misses** — repeated fallback shapes become shadow rules and
+   promote on tool-choice agreement, so LLM spend falls as traffic grows.
+   Guard rails: any divergence demotes instantly; promoted rules keep a
+   permanent 1% sampled double-check. Falling spend can never come from
+   wrong answers.
 
-## Roadmap
+## Roadmap (future)
 
-### Phase 2 — remaining interfaces
-- **gRPC + protobuf contract** (`.proto`, protoc codegen in Makefile) so
-  PHP/Python/Java services call the same engine; async semantics map to the
-  existing answer store (Run + AnswerPoll / server-stream). Telegram is
-  shipped (see capabilities above); gRPC is the remaining interface.
-
-### Phase 3 — the self-optimizing router
-- **Rule miner**: cluster `fallback_events` by normalized prompt shape;
-  candidates enter **shadow mode** (rule runs, LLM still answers, comparator
-  logs agree/diverge); auto-promote after N agreements; **1% permanent
-  shadow sampling with auto-demotion** — the load-bearing guard, because a
-  wrong promoted rule answers wrongly forever while the cost dashboard
-  improves. Promotion ladder: candidate → shadow → canary → full.
-- **ROI-ranked proposals** (frequency × cost saved), parameterized rules
-  with capture groups, `aegisgo rules list|promote|disable|export` admin
-  surface, rules-as-YAML for PR review.
-- **SSE streaming** on /v1/agent/run (deterministic answers sliced through
-  the same contract), `/stats` endpoint (regex deflection rate — the
-  headline metric — plus cost/latency per provider/interface), `aegisgo
-  replay --trace` regression harness over the audit table.
+- REST/gRPC authentication (per-caller keys, rate budgets).
+- gRPC server-streaming Run (SSE-equivalent over the wire).
+- Conversation persistence across processes (sessions in the store).
+- Multi-agent orchestration; ROI-ranked rule proposals (`frequency ×
+  cost saved`) and rules-as-YAML export for PR review.
+- `/stats` history rollups (deflection rate over time, not just snapshot).
 
 ## Non-Goals
 

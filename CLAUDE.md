@@ -31,8 +31,10 @@ internal/tools           common Tool interface + read_csv, csv_stats, read_doc,
                          system_command (fixed-argv catalog), sql_query (ro by default)
 internal/store           embedded SQLite: audit trail, rules table, fallback corpus,
                          async answers; single-writer batcher
-internal/server          REST: /healthz /readyz /v1/agent/run (sync|?async=1) /v1/answers/{id}, optional webhook mount
+internal/server          REST: /healthz /readyz /v1/agent/run (sync|?async=1|?stream=1 SSE) /v1/answers/{id} /v1/stats, optional webhook mount
+internal/grpcapi         gRPC surface over the same engine (internal/pb holds the committed proto stubs)
 internal/telegram        Telegram interface: stdlib Bot API client, dispatcher, durable inbox, webhook + long-poll transports
+internal/miner           fallback corpus → shadow rules (pattern synthesis, dominance threshold)
 internal/mcpclient       mark3labs/mcp-go client + adapter to framework tools
 internal/provider        env-switched agent factory (openai | openai-compat | anthropic | foundry)
 internal/trace           trace-ID minting/propagation (joins logs, audit rows, answers)
@@ -89,6 +91,14 @@ router keeps serving with zero credentials.
     (TestCrashWindowExactlyOneReply, TestOffsetOrdering) — a change that
     breaks them is wrong, not the tests. Unknown chats are never answered.
     The Bot API client stays stdlib-only; do not add a Telegram SDK.
+12. **Mining invariants.** Shadow comparison is tool-choice agreement
+    (engine.ToolNames), never answer-text comparison. Divergence ALWAYS
+    demotes; promoted mined rules ALWAYS keep the 1% sampling
+    (router.sampleActiveMined) — the guard that keeps falling LLM spend
+    from rewarding wrong answers. The miner only proposes path-arg tools
+    (read_csv/csv_stats/read_doc) — system_command and sql_query are never
+    auto-mined. Generated proto stubs are committed; regenerate only via
+    `make proto`.
 
 ## Pinned Dependencies & Known Risks
 

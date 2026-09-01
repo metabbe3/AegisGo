@@ -16,7 +16,7 @@ import (
 // first boot.
 func LoadRules(ctx context.Context, q queryer) ([]RuleDef, error) {
 	rows, err := q.Query(ctx,
-		`SELECT name, pattern, tool, args_template, origin FROM rules WHERE enabled=1`)
+		`SELECT name, pattern, tool, args_template, origin, state FROM rules WHERE enabled=1`)
 	if err != nil {
 		return nil, err
 	}
@@ -25,7 +25,7 @@ func LoadRules(ctx context.Context, q queryer) ([]RuleDef, error) {
 	var defs []RuleDef
 	for rows.Next() {
 		var d RuleDef
-		if err := rows.Scan(&d.Name, &d.Pattern, &d.Tool, &d.ArgsTemplate, &d.Origin); err != nil {
+		if err := rows.Scan(&d.Name, &d.Pattern, &d.Tool, &d.ArgsTemplate, &d.Origin, &d.State); err != nil {
 			return nil, err
 		}
 		defs = append(defs, d)
@@ -37,7 +37,11 @@ func LoadRules(ctx context.Context, q queryer) ([]RuleDef, error) {
 		if err := seedRules(ctx, q); err != nil {
 			return nil, err
 		}
-		return Seeded(), nil
+		defs = Seeded()
+		for i := range defs {
+			defs[i].State = RuleActive
+		}
+		return defs, nil
 	}
 	return defs, nil
 }

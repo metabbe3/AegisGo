@@ -45,7 +45,29 @@ bin/aegis-agent --tier fast "quick question"   # cheap model tier
 
 Or OpenAI / Anthropic / Foundry — see the env table.
 
-## Serve it (REST for your microservices)
+## Self-mining rules (Phase 3)
+
+Every LLM fallback is corpus. Repeated prompt shapes whose runs used one
+derivable tool (`read_csv` / `csv_stats` / `read_doc`) become **shadow**
+rules — they match but never answer; the engine runs the LLM anyway and
+compares **tool choice**. Agreement streak (`AEGIS_MINER_PROMOTE_AFTER`,
+default 5) promotes the rule to active; any divergence demotes it
+instantly. Promoted rules keep a permanent 1% sampling check — divergence
+auto-demotes. LLM spend falls as traffic grows, and the guard means falling
+spend can never come from wrong answers.
+
+```bash
+aegisctl rules mine --threshold 3    # mine now (or let the hourly pass do it)
+aegisctl rules list                  # see shadow/active/demoted
+aegisctl stats                       # deflection rate, top fallback shapes
+aegisctl replay <trace-id>           # audit trail for one run
+```
+
+Demo (live-verified): three LLM answers to "give me stats for file
+testdata/sample.csv" → `rules mine` → two shadow agreements → promoted →
+the same prompt answers in **0ms with `AEGIS_LLM=off`**.
+
+## Serve it (REST + gRPC + SSE for your microservices)
 
 ```bash
 AEGIS_LLM=off AEGIS_ADDR=:8080 bin/aegis-serve &
@@ -55,6 +77,18 @@ curl -s localhost:8080/v1/agent/run -d '{"prompt":"/uptime"}' -H 'X-Trace-Id: t-
 #   {"output":"...","decision_source":"regex_router","trace_id":"t-42","latency_ms":3}
 curl -s -X POST 'localhost:8080/v1/agent/run?async=1' -d '{"prompt":"hard question"}'
 #   202 {"trace_id":"...","status":"pending"}   → poll GET /v1/answers/{trace_id}
+curl -sN -X POST 'localhost:8080/v1/agent/run?stream=1' -d '{"prompt":"..."}'
+#   text/event-stream: delta chunks + final done event (router hits AND LLM runs)
+curl -s localhost:8080/v1/stats     # deflection rate, per-source latency, rule states
+```
+
+**gRPC** (default `:8081`, `AEGIS_GRPC_ADDR=none` disables) for PHP/Python/
+Java callers — contract in `internal/pb/agent.proto`, stubs committed,
+`make proto` regenerates:
+
+```bash
+grpcurl -plaintext -d '{"prompt":"/uptime"}' localhost:8081 aegisgo.v1.Agent/Run
+# Run (sync) · RunAsync + GetAnswer (poll) · Ready · standard health + reflection
 ```
 
 gRPC is on the roadmap (PRODUCT.md) riding the same engine.
@@ -140,7 +174,8 @@ AEGIS_LLM=off bin/aegis-agent /csv_head testdata/sample.csv 1
 | `AEGIS_DB_PATH` | embedded SQLite file (audit, rules, answers) |
 | `AEGIS_SQL_DSN` / `AEGIS_SQL_MODE` | sql_query backend / `ro`\|`rw` |
 | `AEGIS_RULES_RELOAD` | rules hot-reload seconds (0 = off) |
-| `AEGIS_ADDR` | serve listen address |
+| `AEGIS_ADDR` / `AEGIS_GRPC_ADDR` | HTTP / gRPC listen addresses (`none` disables gRPC) |
+| `AEGIS_MINER_THRESHOLD` / `_PROMOTE_AFTER` / `_INTERVAL` | self-mining knobs (20 / 5 / 3600s, 0=off) |
 | `AEGIS_TELEGRAM_TOKEN` | enables the Telegram interface (empty = dormant) |
 | `AEGIS_TELEGRAM_CHATS` | chat allowlist (numeric IDs); empty denies all |
 | `AEGIS_TELEGRAM_WEBHOOK_URL` / `_SECRET` / `_MODE` / `_WORKERS` / `_API_BASE` | transport tuning |

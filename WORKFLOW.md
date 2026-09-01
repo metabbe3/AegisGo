@@ -76,6 +76,34 @@ server is unreachable.
 3. Smoke-test with real creds in a shell (`AEGIS_*`), never in committed
    tests.
 
+### Regenerate the gRPC stubs
+
+Only after editing `internal/pb/agent.proto` (stubs are committed —
+ordinary builds need no protoc):
+
+```bash
+make proto    # protoc + protoc-gen-go[-grpc] (~/go/bin)
+go build ./... && go test ./internal/grpcapi/
+```
+
+### Operate the self-mining lifecycle
+
+```bash
+aegisctl rules mine --threshold 20   # manual pass (or AEGIS_MINER_INTERVAL hourly)
+aegisctl rules list                  # state: active | shadow | demoted
+aegisctl rules promote mined_1       # manual override (auto needs a streak)
+aegisctl rules demote mined_1        # kill a misbehaving rule
+aegisctl stats                       # deflection rate, top fallback shapes
+aegisctl replay <trace-id>           # one run's audit trail
+```
+
+Rules of the lifecycle: only path-arg tools are auto-mined
+(read_csv/csv_stats/read_doc); shadow rules never answer (the LLM does,
+while tool-choice agreement is compared); divergence demotes instantly;
+promoted rules keep a permanent 1% sampled double-check. If a promoted rule
+goes wrong in production: `aegisctl rules demote <name>` — the next hot
+reload drops it (≤ AEGIS_RULES_RELOAD seconds).
+
 ### Enable the Telegram bot
 
 Everything ships built-in; activation is env-only:

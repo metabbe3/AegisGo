@@ -93,6 +93,16 @@ type Config struct {
 	// RulesReloadSecs is the rules-table hot-reload interval; 0 disables.
 	RulesReloadSecs int
 
+	// MinerThreshold is the fallback-cluster size before a shadow rule is
+	// proposed (AEGIS_MINER_THRESHOLD, default 20).
+	MinerThreshold int
+	// MinerPromoteAfter is the consecutive-agreement streak that promotes
+	// a shadow rule (AEGIS_MINER_PROMOTE_AFTER, default 5).
+	MinerPromoteAfter int
+	// MinerIntervalSecs is the mining cadence (AEGIS_MINER_INTERVAL,
+	// default 3600; 0 disables the periodic pass).
+	MinerIntervalSecs int
+
 	// TelegramToken enables the Telegram interface; empty (default) keeps
 	// the whole subsystem dormant — built, wired, and one env var away.
 	TelegramToken string
@@ -137,6 +147,10 @@ func Load() Config {
 		SQLDSN:          strings.TrimSpace(os.Getenv("AEGIS_SQL_DSN")),
 		SQLMode:         envOr("AEGIS_SQL_MODE", "ro"),
 		RulesReloadSecs: AtoiDefault(os.Getenv("AEGIS_RULES_RELOAD"), 30),
+
+		MinerThreshold:    AtoiDefault(os.Getenv("AEGIS_MINER_THRESHOLD"), 20),
+		MinerPromoteAfter: AtoiDefault(os.Getenv("AEGIS_MINER_PROMOTE_AFTER"), 5),
+		MinerIntervalSecs: AtoiDefault(os.Getenv("AEGIS_MINER_INTERVAL"), 3600),
 
 		TelegramToken:         strings.TrimSpace(os.Getenv("AEGIS_TELEGRAM_TOKEN")),
 		TelegramChats:         parseInt64List(os.Getenv("AEGIS_TELEGRAM_CHATS")),

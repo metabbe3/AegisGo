@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -24,6 +25,12 @@ const WebhookPath = "/telegram/webhook"
 // Engine is the slice of *engine.Engine the HTTP layer needs.
 type Engine interface {
 	Run(ctx context.Context, prompt string) engine.Result
+	RunStreaming(ctx context.Context, prompt string, emit func(chunk string) error) engine.Result
+}
+
+// StatsSource computes the stats snapshot.
+type StatsSource interface {
+	Stats(ctx context.Context) (*store.StatsSnapshot, error)
 }
 
 // AnswerStore is the async answer store the API polls.
@@ -43,6 +50,7 @@ type Deps struct {
 	Engine   Engine
 	Answers  AnswerStore
 	Readines Readiness // optional; nil skips the deep check
+	Stats    StatsSource
 	// Webhook, when non-nil, is mounted at POST /telegram/webhook (the
 	// handler itself is built by internal/telegram; the server stays
 	// transport-agnostic).
@@ -82,7 +90,15 @@ func Handler(d Deps) http.Handler {
 	})
 
 	mux.HandleFunc("POST /v1/agent/run", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("stream") == "1" {
+			runAgentStream(w, r, d)
+			return
+		}
 		runAgent(w, r, d)
+	})
+
+	mux.HandleFunc("GET /v1/stats", func(w http.ResponseWriter, r *http.Request) {
+		statsHandler(w, r, d)
 	})
 
 	mux.HandleFunc("GET /v1/answers/{trace}", func(w http.ResponseWriter, r *http.Request) {
@@ -171,6 +187,74 @@ func runAgent(w http.ResponseWriter, r *http.Request, d Deps) {
 		TraceID:        res.TraceID,
 		LatencyMS:      res.LatencyMS,
 	})
+}
+
+// runAgentStream is POST /v1/agent/run?stream=1: server-sent events with
+// `data:` chunks, terminated by a final event carrying the run metadata.
+// Both router hits (deterministic, chunked) and LLM runs (provider deltas)
+// use the same wire shape.
+func runAgentStream(w http.ResponseWriter, r *http.Request, d Deps) {
+	var req runRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		return
+	}
+	if strings.TrimSpace(req.Prompt) == "" {
+		writeError(w, http.StatusBadRequest, "prompt is required")
+		return
+	}
+	fl, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "streaming unsupported")
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.WriteHeader(http.StatusOK)
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+	defer cancel()
+
+	var chunks int
+	res := d.Engine.RunStreaming(ctx, req.Prompt, func(chunk string) error {
+		chunks++
+		return sseWrite(w, fl, "delta", map[string]string{"text": chunk})
+	})
+	_ = sseWrite(w, fl, "done", map[string]any{
+		"decision_source": res.DecisionSource,
+		"rule_id":         res.RuleID,
+		"trace_id":        res.TraceID,
+		"latency_ms":      res.LatencyMS,
+		"chunks":          chunks,
+	})
+}
+
+// sseWrite emits one SSE event as JSON.
+func sseWrite(w http.ResponseWriter, fl http.Flusher, event string, payload any) error {
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, b); err != nil {
+		return err
+	}
+	fl.Flush()
+	return nil
+}
+
+// statsHandler is GET /v1/stats — the observability surface.
+func statsHandler(w http.ResponseWriter, r *http.Request, d Deps) {
+	if d.Stats == nil {
+		writeError(w, http.StatusNotImplemented, "stats unavailable")
+		return
+	}
+	s, err := d.Stats.Stats(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, s)
 }
 
 // getAnswer polls an async run: pending | done | error | 404.

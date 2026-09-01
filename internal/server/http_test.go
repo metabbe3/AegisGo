@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -29,6 +30,14 @@ func (f *fakeEngine) Run(ctx context.Context, prompt string) engine.Result {
 	return engine.Result{Answer: "llm says hi", DecisionSource: store.SourceLLM, TraceID: trace.From(ctx)}
 }
 
+// RunStreaming chunks through the same contract as the real engine.
+func (f *fakeEngine) RunStreaming(ctx context.Context, prompt string, emit func(string) error) engine.Result {
+	if emit != nil {
+		_ = emit("chunk ")
+	}
+	return f.Run(ctx, prompt)
+}
+
 // slowEngine simulates an LLM fallback latency.
 type slowEngine struct {
 	delay time.Duration
@@ -39,6 +48,10 @@ func (s *slowEngine) Run(_ context.Context, _ string) engine.Result {
 	s.runs.Add(1)
 	time.Sleep(s.delay)
 	return engine.Result{Answer: "slow answer", DecisionSource: store.SourceLLM}
+}
+
+func (s *slowEngine) RunStreaming(ctx context.Context, prompt string, emit func(string) error) engine.Result {
+	return s.Run(ctx, prompt)
 }
 
 func TestHealthzAndReadyz(t *testing.T) {
@@ -159,6 +172,70 @@ func TestAsyncRunAndPoll(t *testing.T) {
 	ga.Body.Close()
 	if ga.StatusCode != http.StatusNotFound {
 		t.Errorf("unknown trace status = %d, want 404", ga.StatusCode)
+	}
+}
+
+func TestStreamingSSE(t *testing.T) {
+	st, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	srv := httptest.NewServer(Handler(Deps{Engine: &fakeEngine{}, Answers: st, Stats: st}))
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL+"/v1/agent/run?stream=1", "application/json",
+		strings.NewReader(`{"prompt":"/uptime"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/event-stream") {
+		t.Fatalf("content-type = %q", ct)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	s := string(body)
+	if !strings.Contains(s, "event: delta") || !strings.Contains(s, "event: done") {
+		t.Errorf("sse body = %q", s)
+	}
+	if !strings.Contains(s, `"decision_source":"regex_router"`) {
+		t.Errorf("done event missing decision_source: %q", s)
+	}
+}
+
+func TestStatsEndpoint(t *testing.T) {
+	st, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	st.Audit(context.Background(), store.AuditEvent{
+		TraceID: "t1", Interface: store.IFaceREST, DecisionSource: store.SourceRouter,
+		Prompt: "/uptime", LatencyMS: 2,
+	})
+	st.Audit(context.Background(), store.AuditEvent{
+		TraceID: "t2", Interface: store.IFaceCLI, DecisionSource: store.SourceLLM,
+		Prompt: "story", LatencyMS: 900,
+	})
+
+	srv := httptest.NewServer(Handler(Deps{Engine: &fakeEngine{}, Answers: st, Stats: st}))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/v1/stats")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var s store.StatsSnapshot
+	if err := json.NewDecoder(resp.Body).Decode(&s); err != nil {
+		t.Fatal(err)
+	}
+	if s.TotalRuns != 2 || s.DeflectionRate != 0.5 {
+		t.Errorf("stats = %+v", s)
+	}
+	if s.BySource[store.SourceRouter] != 1 || s.ByInterface[store.IFaceCLI] != 1 {
+		t.Errorf("breakdown = %+v", s)
 	}
 }
 

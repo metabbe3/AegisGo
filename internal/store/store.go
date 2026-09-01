@@ -259,6 +259,11 @@ func (s *Store) migrate() error {
 			return err
 		}
 	}
+	if version < 3 {
+		if err := s.migrateV3(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -354,6 +359,36 @@ func (s *Store) migrateV2() error {
 		if _, err := tx.Exec(stmt); err != nil {
 			tx.Rollback()
 			return fmt.Errorf("migrating to v2: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+// migrateV3 adds the Phase-3 rule lifecycle: rules carry a state
+// (active | shadow | demoted) and shadow comparisons land in
+// shadow_events for promotion/demotion decisions.
+func (s *Store) migrateV3() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	stmts := []string{
+		`ALTER TABLE rules ADD COLUMN state TEXT NOT NULL DEFAULT 'active'`,
+		`CREATE TABLE IF NOT EXISTS shadow_events (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			ts TEXT NOT NULL,
+			rule_name TEXT NOT NULL,
+			trace_id TEXT NOT NULL,
+			agreed INTEGER NOT NULL,
+			llm_tools TEXT
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_shadow_rule ON shadow_events(rule_name, id)`,
+		`PRAGMA user_version = 3`,
+	}
+	for _, stmt := range stmts {
+		if _, err := tx.Exec(stmt); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("migrating to v3: %w", err)
 		}
 	}
 	return tx.Commit()

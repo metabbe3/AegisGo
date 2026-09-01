@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"regexp"
 	"strconv"
 	"strings"
@@ -21,10 +22,19 @@ import (
 // path (they are not command-shaped).
 const MaxPrompt = 4 * 1024
 
+// Rule lifecycle states. Seeded rules are active; mined rules enter as
+// shadow (learn before they answer) and promote on agreement — or demote
+// on any divergence. Demoted rules are disabled.
+const (
+	RuleActive  = "active"
+	RuleShadow  = "shadow"
+	RuleDemoted = "demoted"
+)
+
 // RuleDef is the declarative form of a rule — what the rules table stores
-// and what the Phase-3 miner will write.
+// and what the Phase-3 miner writes.
 type RuleDef struct {
-	Name string // rule id, e.g. "uptime"
+	Name string // rule id, e.g. "uptime" or "mined_3"
 	// Pattern is an unanchored regex; the router anchors it as ^(?:pattern)$.
 	Pattern string
 	// Tool is the registered tool name to execute on match.
@@ -34,6 +44,16 @@ type RuleDef struct {
 	ArgsTemplate string
 	// Origin is "seed" or "mined".
 	Origin string
+	// State is RuleActive (default), RuleShadow, or RuleDemoted.
+	State string
+}
+
+// EffectiveState defaults empty to active (pre-v3 rows, in-code seeds).
+func (d RuleDef) EffectiveState() string {
+	if d.State == "" {
+		return RuleActive
+	}
+	return d.State
 }
 
 // CompiledRule is a RuleDef ready to match.
@@ -41,6 +61,12 @@ type CompiledRule struct {
 	RuleDef
 	re *regexp.Regexp
 }
+
+// Compile validates and anchors a RuleDef's pattern.
+func (d RuleDef) Compile() (CompiledRule, error) { return d.compile() }
+
+// Regexp exposes the anchored pattern (tests, admin tooling).
+func (c *CompiledRule) Regexp() *regexp.Regexp { return c.re }
 
 func (r RuleDef) compile() (CompiledRule, error) {
 	re, err := regexp.Compile(`^(?:` + r.Pattern + `)$`)
@@ -112,6 +138,19 @@ type Decision struct {
 	// Err carries tool execution failures (Handled is still true — the
 	// rule matched; the tool failed).
 	Err error
+
+	// Evaluate requests the shadow comparison: the engine ALSO runs the
+	// LLM and records tool-choice agreement in shadow_events. Set for
+	// shadow-state rules (always) and active mined rules (1% sampling).
+	Evaluate bool
+	// AnswerFromRule selects whose answer wins when Evaluate is set:
+	// true (sampled active rule — the rule answers, LLM only checks) or
+	// false (shadow rule — the LLM answers while the rule learns).
+	AnswerFromRule bool
+
+	// Tool and Args expose the matched invocation for the comparison.
+	Tool string
+	Args []byte
 }
 
 // Text renders the tool output as the reply body.
@@ -125,6 +164,22 @@ func (d Decision) Text() string {
 	}
 	return string(b)
 }
+
+// sampleActiveMined is the 1% permanent-sampling decision for promoted
+// mined rules — the auto-demotion guard. A variable (not a const) purely
+// as the deterministic injection point for tests.
+var sampleActiveMined = func() bool { return rand.Intn(100) == 0 }
+
+// SetSampleForTest swaps the sampler and returns the previous one.
+// Production code never calls this; tests force the 1% branch deterministically.
+func SetSampleForTest(f func() bool) func() bool {
+	prev := sampleActiveMined
+	sampleActiveMined = f
+	return prev
+}
+
+// SampleForTest exposes the current sampler (test assertions).
+func SampleForTest() func() bool { return sampleActiveMined }
 
 // Handle routes one prompt. Matching rules execute their tool inline; the
 // caller decides what a miss means (LLM fallback lives in internal/engine).
@@ -147,7 +202,20 @@ func (r *Router) Handle(ctx context.Context, prompt string) Decision {
 				Err: fmt.Errorf("tool %q vanished", rule.Tool)}
 		}
 		out, err := tl.Execute(ctx, args)
-		return Decision{Handled: true, RuleID: rule.Name, Output: out, Err: err}
+
+		d := Decision{Handled: true, RuleID: rule.Name, Output: out, Err: err,
+			Tool: rule.Tool, Args: args}
+		switch rule.EffectiveState() {
+		case RuleShadow:
+			// Learn: LLM answers, rule is compared.
+			d.Evaluate, d.AnswerFromRule = true, false
+		case RuleActive:
+			if rule.Origin == "mined" && sampleActiveMined() {
+				// Guard: rule answers, LLM double-checks 1% of traffic.
+				d.Evaluate, d.AnswerFromRule = true, true
+			}
+		}
+		return d
 	}
 	return Decision{}
 }
