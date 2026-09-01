@@ -1,0 +1,5 @@
+%PDF-1.4
+% AegisGo test fixture. Not a real PDF: read_doc's extension allowlist
+% rejects .pdf before the file is ever opened, so this only needs to exist
+% (resolvePath must succeed) and carry the extension.
+%%EOF

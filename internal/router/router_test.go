@@ -270,13 +270,27 @@ func TestHandlePromptTooLong(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// One byte over the cap, shaped like a routed command: still refused —
-	// oversized prompts are not command-shaped and skip to the LLM path.
-	prompt := "/uptime " + strings.Repeat("x", MaxPrompt)
-	if len(prompt) <= MaxPrompt {
-		t.Fatalf("test prompt length = %d, want > %d", len(prompt), MaxPrompt)
+	// Exact boundary, shaped like a routed command: /csv_head's \S+ capture
+	// is padded so the prompt lands at exactly MaxPrompt bytes and still
+	// matches (the cap is >, not >=). The padded path then fails inside the
+	// tool — fine, the point is the rule was reached at all.
+	const head = "/csv_head "
+	atCap := head + strings.Repeat("a", MaxPrompt-len(head))
+	if len(atCap) != MaxPrompt {
+		t.Fatalf("at-cap prompt length = %d, want exactly %d", len(atCap), MaxPrompt)
 	}
-	d := r.Handle(context.Background(), prompt)
+	if d := r.Handle(context.Background(), atCap); !d.Handled || d.RuleID != "csv_head" {
+		t.Errorf("exactly MaxPrompt bytes must still route: %+v", d)
+	}
+
+	// One byte over the cap, same command shape: refused with an empty
+	// Decision — oversized prompts are not command-shaped and skip to the
+	// LLM path.
+	overCap := head + strings.Repeat("a", MaxPrompt-len(head)+1)
+	if len(overCap) != MaxPrompt+1 {
+		t.Fatalf("over-cap prompt length = %d, want exactly %d", len(overCap), MaxPrompt+1)
+	}
+	d := r.Handle(context.Background(), overCap)
 	if d.Handled || d.RuleID != "" || d.Evaluate || d.Err != nil {
 		t.Errorf("over-cap prompt must return an empty Decision: %+v", d)
 	}

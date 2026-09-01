@@ -10,7 +10,7 @@ proto:
 		--go-grpc_out=./internal/pb --go-grpc_opt=paths=source_relative \
 		internal/pb/agent.proto
 
-## build: compile both binaries into ./bin
+## build: compile aegis-agent, aegis-serve, and mcp-echo-server into ./bin
 build:
 	go build -o bin/$(BINARY_AGENT) ./cmd/aegis-agent
 	go build -o bin/$(BINARY_SERVE) ./cmd/aegis-serve

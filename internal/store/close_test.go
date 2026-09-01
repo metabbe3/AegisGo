@@ -158,6 +158,12 @@ func TestCloseDrainsQueuedWrites(t *testing.T) {
 			Prompt:         "/uptime",
 		})
 	}
+	// White-box precondition: the backlog must still be queued when Close
+	// fires, or the drain path does no work and the assertions below prove
+	// nothing about shutdown.
+	if len(s.writes) == 0 {
+		t.Fatal("backlog drained before Close; drain path not exercised")
+	}
 	// Deliberately no Flush before Close.
 	if err := s.Close(); err != nil {
 		t.Fatalf("Close: %v", err)

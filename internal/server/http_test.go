@@ -597,7 +597,9 @@ func TestSSEStreamShape(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/event-stream") {
+	// The handler sets the exact literal; equality (not prefix) pins that no
+	// charset or parameter sneaks in behind a lenient check.
+	if ct := resp.Header.Get("Content-Type"); ct != "text/event-stream" {
 		t.Fatalf("content-type = %q", ct)
 	}
 
