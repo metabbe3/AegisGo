@@ -22,6 +22,9 @@ type fakeClient struct {
 	sendErr   error
 	editErr   error
 	updates   []Update // returned by GetUpdates
+	// getUpdatesErr is one-shot: the first GetUpdates call fails with it
+	// (a transient API error), later calls return updates normally.
+	getUpdatesErr error
 }
 
 func (f *fakeClient) GetMe(context.Context) (string, error) { return "aegis_test_bot", nil }
@@ -50,11 +53,24 @@ func (f *fakeClient) EditMessageText(_ context.Context, _, _ int64, text string)
 	return nil
 }
 
-func (f *fakeClient) GetUpdates(_ context.Context, _ int64, _ time.Duration) ([]Update, error) {
+func (f *fakeClient) GetUpdates(_ context.Context, offset int64, _ time.Duration) ([]Update, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	out := f.updates
-	f.updates = nil
+	if f.getUpdatesErr != nil {
+		err := f.getUpdatesErr
+		f.getUpdatesErr = nil
+		return nil, err
+	}
+	// Mirror Telegram offset semantics: un-acked updates (update_id >=
+	// offset) are re-delivered on every call until the poller confirms
+	// past them. This is what lets the loop's advance() retry until work
+	// is fully processed — a one-shot batch would never be acked.
+	var out []Update
+	for _, u := range f.updates {
+		if u.UpdateID >= offset {
+			out = append(out, u)
+		}
+	}
 	return out, nil
 }
 func (f *fakeClient) SetWebhook(context.Context, string, string) error { return nil }
