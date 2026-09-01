@@ -14,15 +14,15 @@ func TestModelFor(t *testing.T) {
 		t.Errorf("smart = %q, want base", got)
 	}
 	if got := c.ModelFor(TierFast); got != "cheap" {
-		t.Errorf("fast = %q", got)
+		t.Errorf("fast = %q, want cheap", got)
 	}
 
 	c = Config{ModelFast: "cheap", ModelSmart: "strong"}
 	if got := c.ModelFor(TierFast); got != "cheap" {
-		t.Errorf("fast = %q", got)
+		t.Errorf("fast = %q, want cheap", got)
 	}
 	if got := c.ModelFor(TierSmart); got != "strong" {
-		t.Errorf("smart = %q", got)
+		t.Errorf("smart = %q, want strong", got)
 	}
 }
 
