@@ -22,6 +22,7 @@ const (
 	IFaceCLI      = "cli"
 	IFaceREST     = "rest"
 	IFaceTelegram = "telegram"
+	IFaceGRPC     = "grpc"
 )
 
 // AuditEvent is one row of the decision trail.

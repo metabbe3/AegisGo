@@ -12,14 +12,18 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"google.golang.org/grpc"
+
 	"aegisgo/internal/app"
 	"aegisgo/internal/config"
+	"aegisgo/internal/grpcapi"
 	"aegisgo/internal/server"
 	"aegisgo/internal/store"
 )
@@ -63,15 +67,33 @@ func serve(ctx context.Context, tierFlag string) error {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	errCh := make(chan error, 1)
+	errCh := make(chan error, 2)
 	go func() {
-		logger.Info("listening", "addr", cfg.Addr)
+		logger.Info("listening", "addr", cfg.Addr, "proto", "http")
 		errCh <- srv.ListenAndServe()
 	}()
 
+	// gRPC interface (same engine) for cross-language callers; disable
+	// with AEGIS_GRPC_ADDR=none.
+	var grpcSrv *grpc.Server
+	if cfg.GRPCEnabled() {
+		lis, err := net.Listen("tcp", cfg.GRPCAddr)
+		if err != nil {
+			return err
+		}
+		grpcSrv = grpc.NewServer()
+		grpcapi.Register(grpcSrv, grpcapi.New(a.Engine, a.Store, a.Store, logger))
+		go func() {
+			logger.Info("listening", "addr", cfg.GRPCAddr, "proto", "grpc")
+			errCh <- grpcSrv.Serve(lis)
+		}()
+	} else {
+		logger.Info("grpc disabled — set AEGIS_GRPC_ADDR (e.g. :8081) to enable")
+	}
+
 	select {
 	case err := <-errCh:
-		if errors.Is(err, http.ErrServerClosed) {
+		if errors.Is(err, http.ErrServerClosed) || errors.Is(err, grpc.ErrServerStopped) {
 			return nil
 		}
 		return err
@@ -81,6 +103,9 @@ func serve(ctx context.Context, tierFlag string) error {
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			return err
+		}
+		if grpcSrv != nil {
+			grpcSrv.GracefulStop()
 		}
 		// Give in-flight async runs a beat to persist their answers, then
 		// close the store (cleanup drains queued audit writes).

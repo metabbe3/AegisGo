@@ -1,7 +1,14 @@
 BINARY_AGENT := aegis-agent
 BINARY_SERVE := aegis-serve
 
-.PHONY: build test vet lint run-agent run-serve clone-refs tidy clean
+.PHONY: build test vet lint proto run-agent run-serve clone-refs tidy clean
+
+## proto: regenerate gRPC stubs (requires protoc + protoc-gen-go[-grpc])
+proto:
+	PATH="$$PATH:$$HOME/go/bin" protoc \
+		--go_out=./internal/pb --go_opt=paths=source_relative \
+		--go-grpc_out=./internal/pb --go-grpc_opt=paths=source_relative \
+		internal/pb/agent.proto
 
 ## build: compile both binaries into ./bin
 build:

@@ -1,0 +1,67 @@
+// AegisGo gRPC contract — the same hybrid engine the REST API exposes,
+// for cross-language callers (PHP, Python, Java, …). Regenerate stubs with
+// `make proto`; the generated code is committed so ordinary builds need no
+// protoc.
+syntax = "proto3";
+
+package aegisgo.v1;
+
+option go_package = "aegisgo/internal/pb;aegisgo";
+
+// Agent is the hybrid decision engine over gRPC. Every run is audited with
+// its decision_source (regex_router | llm | llm_disabled | error) exactly
+// like the REST and Telegram interfaces.
+service Agent {
+  // Run executes the hybrid pipeline synchronously. Router hits return in
+  // milliseconds; LLM fallbacks may take up to minutes — prefer RunAsync
+  // for those callers.
+  rpc Run(RunRequest) returns (RunResponse);
+
+  // RunAsync acknowledges immediately and parks the answer under its trace
+  // id; poll GetAnswer.
+  rpc RunAsync(RunRequest) returns (AsyncAck);
+
+  // GetAnswer polls an async run: pending | done | error (NOT_FOUND when
+  // unknown or expired).
+  rpc GetAnswer(GetAnswerRequest) returns (AnswerStatus);
+
+  // Ready reports whether the backing store is reachable.
+  rpc Ready(ReadyRequest) returns (ReadyResponse);
+}
+
+message RunRequest {
+  // Prompt is the user message. Required.
+  string prompt = 1;
+  // TraceID optionally carries a caller trace; echoed on every response.
+  string trace_id = 2;
+}
+
+message RunResponse {
+  string output = 1;
+  string decision_source = 2;
+  string trace_id = 3;
+  string rule_id = 4;
+  int64 latency_ms = 5;
+}
+
+message AsyncAck {
+  string trace_id = 1;
+  string status = 2;
+}
+
+message GetAnswerRequest {
+  string trace_id = 1;
+}
+
+message AnswerStatus {
+  string trace_id = 1;
+  string status = 2;
+  string output = 3;
+}
+
+message ReadyRequest {}
+
+message ReadyResponse {
+  bool ready = 1;
+  string detail = 2;
+}

@@ -68,6 +68,10 @@ type Config struct {
 	// Addr is the listen address for aegis-serve (default ":8080").
 	Addr string
 
+	// GRPCAddr is the gRPC listener address (default ":8081"). Set
+	// AEGIS_GRPC_ADDR=none to disable the gRPC interface entirely.
+	GRPCAddr string
+
 	// LogLevel is the slog level name: debug, info, warn, or error.
 	LogLevel string
 
@@ -126,6 +130,7 @@ func Load() Config {
 		Workspace:       strings.TrimSpace(os.Getenv("AEGIS_WORKSPACE")),
 		MCPServers:      parseList(os.Getenv("AEGIS_MCP_SERVERS")),
 		Addr:            envOr("AEGIS_ADDR", ":8080"),
+		GRPCAddr:        envOr("AEGIS_GRPC_ADDR", ":8081"),
 		LogLevel:        envOr("AEGIS_LOG_LEVEL", "info"),
 		LLM:             envOr("AEGIS_LLM", "on"),
 		DBPath:          envOr("AEGIS_DB_PATH", "aegisgo.db"),
@@ -175,6 +180,11 @@ func parseInt64List(s string) []int64 {
 
 // LLMDisabled reports whether the LLM fallback kill switch is on.
 func (c Config) LLMDisabled() bool { return strings.EqualFold(c.LLM, "off") }
+
+// GRPCEnabled reports whether the gRPC interface should listen.
+func (c Config) GRPCEnabled() bool {
+	return c.GRPCAddr != "" && !strings.EqualFold(c.GRPCAddr, "none")
+}
 
 // Validate reports configuration problems before anything dials out.
 func (c Config) Validate() error {
