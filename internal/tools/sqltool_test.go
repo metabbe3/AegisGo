@@ -2,8 +2,10 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -116,5 +118,120 @@ func TestSQLRowCap(t *testing.T) {
 		&out)
 	if len(out.Rows) != sqlMaxRows || !out.Truncated {
 		t.Errorf("rows=%d truncated=%v", len(out.Rows), out.Truncated)
+	}
+}
+
+func TestSQLValidateQueryEmpty(t *testing.T) {
+	tl := newSQLTool(t, "ro")
+	_, err := tl.Execute(context.Background(), []byte(`{"query":"   "}`))
+	if err == nil {
+		t.Fatal("blank query accepted")
+	}
+	if !strings.Contains(err.Error(), "query is required") {
+		t.Errorf("error = %q, want query-is-required wording", err)
+	}
+}
+
+func TestSQLQueryContextCanceled(t *testing.T) {
+	tl := newSQLTool(t, "ro")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := tl.Execute(ctx, []byte(`{"query":"SELECT 1"}`))
+	if err == nil {
+		t.Fatal("canceled context accepted")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("error = %v, want context.Canceled in the chain", err)
+	}
+}
+
+func TestSQLQuerySyntaxError(t *testing.T) {
+	// Passes the policy layer (select prefix, no literals) but is not valid
+	// SQL: the failure surfaces wrapped from the query itself.
+	tl := newSQLTool(t, "ro")
+	_, err := tl.Execute(context.Background(), []byte(`{"query":"select nope"}`))
+	if err == nil {
+		t.Fatal("invalid SQL accepted")
+	}
+	if !strings.Contains(err.Error(), "query: ") {
+		t.Errorf("error = %q, want it wrapped after %q", err, "query:")
+	}
+}
+
+func TestSQLDefaultDatabaseMissing(t *testing.T) {
+	// No Path and no DSN: openSQLDB falls back to "aegisgo.db" in the
+	// process CWD (the package dir during go test) in read-only mode, which
+	// cannot create the file — the run must fail loudly, not fall back to rw.
+	tl, err := NewSQLQuery(workspace(t), SQLOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = tl.Execute(context.Background(), []byte(`{"query":"SELECT 1"}`))
+	if err == nil {
+		t.Fatal("missing default database accepted")
+	}
+}
+
+// attachTool builds an ro sql_query tool over a seeded DB in dir, with the
+// workspace also rooted at dir so attach fixtures resolve next to it.
+func attachTool(t *testing.T, dir string) Tool {
+	t.Helper()
+	path := filepath.Join(dir, "tool.db")
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tl, err := NewSQLQuery(dir, SQLOptions{Path: path, Mode: "ro"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tl
+}
+
+func TestSQLAttachCSVErrors(t *testing.T) {
+	dir := t.TempDir()
+	writeWSFile(t, dir, "data.txt", "not,a,csv\n")
+	writeWSFile(t, dir, "empty.csv", "")
+	writeWSFile(t, dir, "bad.csv", "a,b\n\"x\n")
+	tl := attachTool(t, dir)
+	ctx := context.Background()
+
+	// Non-identifier table names are rejected before anything resolves.
+	_, err := tl.Execute(ctx, []byte(`{"query":"SELECT 1","attach_csvs":[{"name":"9bad!","path":"empty.csv"}]}`))
+	if err == nil || !strings.Contains(err.Error(), "invalid table name") {
+		t.Errorf("bad name: err=%v", err)
+	}
+
+	cases := []struct {
+		path, wantErr string
+	}{
+		{"missing.csv", "not found"},
+		{"data.txt", "is not a CSV file"},
+		{"empty.csv", "reading header"},
+		{"bad.csv", "reading record"},
+	}
+	for _, tc := range cases {
+		args := `{"query":"SELECT 1","attach_csvs":[{"name":"t","path":` + quoteJSON(tc.path) + `}]}`
+		_, err := tl.Execute(ctx, []byte(args))
+		if err == nil {
+			t.Errorf("%s: accepted, want error", tc.path)
+			continue
+		}
+		if !strings.Contains(err.Error(), tc.wantErr) {
+			t.Errorf("%s: error = %q, want it to contain %q", tc.path, err, tc.wantErr)
+		}
+	}
+}
+
+func TestSanitizeIdent(t *testing.T) {
+	cases := map[string]string{
+		"order_id": "order_id", // already clean
+		"qty!":     "qty_",     // punctuation folded
+		"a b-c":    "a_b_c",
+		"":         "col", // empty header gets a name
+	}
+	for in, want := range cases {
+		if got := sanitizeIdent(in); got != want {
+			t.Errorf("sanitizeIdent(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

@@ -62,6 +62,43 @@ func TestReadDocRejectsBinaryAndEscapes(t *testing.T) {
 	}
 }
 
+func TestReadDocRejectsUnsupportedExtension(t *testing.T) {
+	// go.mod exists at the workspace root and its extension is outside the
+	// text allowlist, so the extension gate itself (not a resolve error)
+	// must reject it.
+	tl, err := NewReadDoc(workspace(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = tl.Execute(context.Background(), []byte(`{"path":"go.mod"}`))
+	if err == nil {
+		t.Fatal("unsupported extension accepted")
+	}
+	if !strings.Contains(err.Error(), `does not support ".mod"`) {
+		t.Errorf("error = %q, want it to name the rejected extension", err)
+	}
+}
+
+func TestReadDocRejectsDirectory(t *testing.T) {
+	// A directory with an allowed extension passes the extension gate and
+	// opens fine; the Stat check must still refuse to "read" it.
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "notes.csv"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tl, err := NewReadDoc(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = tl.Execute(context.Background(), []byte(`{"path":"notes.csv"}`))
+	if err == nil {
+		t.Fatal("directory accepted as a document")
+	}
+	if !strings.Contains(err.Error(), "is a directory") {
+		t.Errorf("error = %q, want directory wording", err)
+	}
+}
+
 func TestResolvePath(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "sub"), 0o755); err != nil {
