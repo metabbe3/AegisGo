@@ -140,6 +140,38 @@ sqlite3 aegisgo.db "SELECT normalized_prompt, COUNT(*) c FROM fallback_events GR
 
 The answers table TTLs rows out (~15 min) and lazily deletes on read.
 
+### End-to-end verification (macOS)
+
+Run the staged e2e before tagging a release, after touching the router,
+tools, store, or any interface wiring — it exercises the real binaries
+(`make build` runs inside it), not test doubles:
+
+```bash
+make e2e        # or ./scripts/e2e.sh — needs go, sqlite3, curl, python3
+```
+
+Twelve stages, each proving one slice: S1 CLI router matrix · S2 workspace
+csv/log/doc reads plus a hot-reloaded `/search` rule (sql_query attach_csv)
+· S3 REST matrix (sync, async 202→poll, SSE, /v1/stats, 404, X-Trace-Id
+echo) · S4 hot reload · S5 gRPC via grpcurl · S6 MCP server attach ·
+S7 Telegram against a python3 fake Bot API (poll mode + webhook with
+secret check) · S8 aegisctl · S9 miner · S10 audit-trail joins · S11 real
+LLM fallback through local Ollama, MCP echo tool included.
+
+Notes:
+
+- **Darwin caveat, asserted**: `free` does not exist on macOS, so `/memory`
+  and `/free` are *expected to fail* with `command "memory" failed`. If
+  they ever succeed on a Mac, the system_command catalog has drifted.
+- S5 and S11 are optional-but-run-when-present: without grpcurl or an
+  Ollama model they print `SKIP` with the fix (`brew install grpcurl`,
+  `ollama pull qwen2.5:0.5b`) and the run still passes.
+- Fixed ports 18080-18083 + 18090, guarded up front; a busy port means a
+  previous run is still alive. Each run gets its own mktemp workspace, so
+  back-to-back runs are safe.
+- The script starts (and kills) everything it needs on loopback; if no
+  Ollama server is up it starts one for the run only.
+
 ### Bump dependencies
 
 `mcp-go`: prefer stable tags. `agent-framework-go`: pinned to a commit (no
