@@ -10,6 +10,9 @@ project is, WORKFLOW.md for how changes are made.
 make build        # compile bin/aegis-agent and bin/aegis-serve
 make test         # go test ./...          — no network, no API keys needed
 make vet          # go vet ./...
+make cover        # unit tests with coverage gate (fails below 90%)
+make check        # no TODO/FIXME, no skipped tests, every non-generated pkg tested
+make e2e          # staged macOS end-to-end run (scripts/e2e.sh)
 go run ./cmd/aegis-agent "/uptime"       # router hit: instant, zero LLM cost
 AEGIS_LLM=off go run ./cmd/aegis-serve   # router-only mode, no credentials needed
 go run ./cmd/aegis-serve                 # HTTP service on :8080
