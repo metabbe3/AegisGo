@@ -3,8 +3,12 @@ package router
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
+	"regexp/syntax"
+	"strings"
 	"testing"
 
 	"aegisgo/internal/tools"
@@ -140,5 +144,148 @@ func TestRouterSwap(t *testing.T) {
 	}
 	if d := r.Handle(context.Background(), "/only"); !d.Handled || d.RuleID != "only" {
 		t.Errorf("new rule: %+v", d)
+	}
+}
+
+func TestCompileAnchorsPattern(t *testing.T) {
+	c, err := RuleDef{Name: "uptime", Pattern: `/uptime`, Tool: "system_command"}.Compile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Regexp().String(); !strings.Contains(got, "^(?:") || !strings.HasSuffix(got, ")$") {
+		t.Errorf("anchored pattern = %q, want ^(?:…)$ wrapping", got)
+	}
+	if !c.Regexp().MatchString("/uptime") {
+		t.Error("exact prompt must match the anchored pattern")
+	}
+	if c.Regexp().MatchString("say /uptime now") {
+		t.Error("substring-containing prompt must not match (anchor broken)")
+	}
+}
+
+func TestCompileErrors(t *testing.T) {
+	_, err := RuleDef{Name: "bad", Pattern: "(", Tool: "read_csv"}.Compile()
+	if err == nil {
+		t.Fatal("invalid regex accepted")
+	}
+	if !strings.Contains(err.Error(), "rule bad:") {
+		t.Errorf("error must name the rule: %v", err)
+	}
+	var rerr *syntax.Error
+	if !errors.As(err, &rerr) {
+		t.Errorf("error must wrap the underlying regexp failure: %v", err)
+	}
+
+	_, err = RuleDef{Name: "toolless", Pattern: "a"}.Compile()
+	if err == nil {
+		t.Fatal("missing tool accepted")
+	}
+	if !strings.Contains(err.Error(), "tool is required") {
+		t.Errorf("error = %v, want 'tool is required'", err)
+	}
+	if !strings.Contains(err.Error(), "toolless") {
+		t.Errorf("error must name the rule: %v", err)
+	}
+
+	// Swap validates identically (the hot-reload entry point): a bad set is
+	// rejected atomically and the previous rules keep serving.
+	r, err := New(testRegistry(t), Seeded())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Swap([]RuleDef{{Name: "s", Pattern: "a", Tool: "ghost_tool"}}); err == nil {
+		t.Error("Swap accepted an unknown tool")
+	}
+	if d := r.Handle(context.Background(), "/uptime"); !d.Handled || d.RuleID != "uptime" {
+		t.Errorf("rejected Swap must keep previous rules: %+v", d)
+	}
+}
+
+func TestSampleForTestForcesSampling(t *testing.T) {
+	trueFn := func() bool { return true }
+	prev := SetSampleForTest(trueFn)
+	defer SetSampleForTest(prev)
+
+	if got := SampleForTest(); reflect.ValueOf(got).Pointer() != reflect.ValueOf(trueFn).Pointer() {
+		t.Error("SampleForTest must expose the installed sampler fn")
+	}
+
+	r, err := New(testRegistry(t), []RuleDef{
+		{Name: "mined_active", Pattern: "/ping", Tool: "read_csv",
+			ArgsTemplate: `{"path":"testdata/sample.csv"}`, Origin: "mined", State: RuleActive},
+		{Name: "shadow_rule", Pattern: "/shadow", Tool: "read_csv",
+			ArgsTemplate: `{"path":"testdata/sample.csv"}`, Origin: "mined", State: RuleShadow},
+		{Name: "seed_rule", Pattern: "/seed", Tool: "read_csv",
+			ArgsTemplate: `{"path":"testdata/sample.csv"}`, Origin: "seed", State: RuleActive},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Sampler true → the active mined rule answers AND requests the LLM
+	// double-check (the 1% demotion guard).
+	d := r.Handle(context.Background(), "/ping")
+	if !d.Handled || d.RuleID != "mined_active" || d.Err != nil {
+		t.Fatalf("sampled mined rule: %+v", d)
+	}
+	if !d.Evaluate || !d.AnswerFromRule {
+		t.Errorf("sampling forced: Evaluate=%v AnswerFromRule=%v, want true/true", d.Evaluate, d.AnswerFromRule)
+	}
+	if d.Output == nil || d.Text() == "" {
+		t.Errorf("sampled rule must still produce the answer: %+v", d)
+	}
+
+	// Sampler false → no evaluation: the promoted rule serves unchecked.
+	SetSampleForTest(func() bool { return false })
+	d = r.Handle(context.Background(), "/ping")
+	if !d.Handled || d.RuleID != "mined_active" {
+		t.Fatalf("unsampled mined rule: %+v", d)
+	}
+	if d.Evaluate || d.AnswerFromRule {
+		t.Errorf("sampler false: Evaluate=%v AnswerFromRule=%v, want false/false", d.Evaluate, d.AnswerFromRule)
+	}
+
+	// Shadow rules always evaluate, and the LLM (not the rule) answers.
+	d = r.Handle(context.Background(), "/shadow")
+	if !d.Handled || d.RuleID != "shadow_rule" {
+		t.Fatalf("shadow rule: %+v", d)
+	}
+	if !d.Evaluate || d.AnswerFromRule {
+		t.Errorf("shadow rule: Evaluate=%v AnswerFromRule=%v, want true/false", d.Evaluate, d.AnswerFromRule)
+	}
+
+	// Seed-origin rules never sample, whatever the sampler says.
+	SetSampleForTest(func() bool { return true })
+	d = r.Handle(context.Background(), "/seed")
+	if !d.Handled || d.RuleID != "seed_rule" {
+		t.Fatalf("seed rule: %+v", d)
+	}
+	if d.Evaluate || d.AnswerFromRule {
+		t.Errorf("seed rule must never sample: Evaluate=%v AnswerFromRule=%v", d.Evaluate, d.AnswerFromRule)
+	}
+}
+
+func TestHandlePromptTooLong(t *testing.T) {
+	r, err := New(testRegistry(t), Seeded())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// One byte over the cap, shaped like a routed command: still refused —
+	// oversized prompts are not command-shaped and skip to the LLM path.
+	prompt := "/uptime " + strings.Repeat("x", MaxPrompt)
+	if len(prompt) <= MaxPrompt {
+		t.Fatalf("test prompt length = %d, want > %d", len(prompt), MaxPrompt)
+	}
+	d := r.Handle(context.Background(), prompt)
+	if d.Handled || d.RuleID != "" || d.Evaluate || d.Err != nil {
+		t.Errorf("over-cap prompt must return an empty Decision: %+v", d)
+	}
+	if d.Text() != "" {
+		t.Errorf("empty decision text = %q, want empty", d.Text())
+	}
+
+	// Unmarshalable output falls back to fmt.Sprint instead of erroring.
+	if got := (Decision{Output: make(chan int)}).Text(); got == "" {
+		t.Error("Text fallback for unmarshalable output returned empty string")
 	}
 }
