@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"aegisgo/internal/task"
 )
 
 // Job lifecycle statuses. They deliberately mirror the store's answers
@@ -47,6 +49,7 @@ type JobManager struct {
 	mu       sync.RWMutex
 	jobs     map[string]*Job
 	finished []string // finish order, oldest first — drives retention eviction
+	tasks    task.Group
 }
 
 // NewJobManager returns an empty manager.
@@ -56,8 +59,8 @@ func NewJobManager() *JobManager {
 
 // Start registers a running job and launches fn on its own goroutine,
 // returning the job id immediately. fn runs under a context detached from
-// the caller's (context.WithoutCancel) but bounded by timeout: a background
-// job must outlive the HTTP request that started it, yet never run forever.
+// the caller's but bounded by timeout (task.Group.Go): a background job
+// must outlive the HTTP request that started it, yet never run forever.
 // The wrapper here is the only writer of the job's outcome — callers pass a
 // plain function, never a *Job — so jobs are race-free by construction.
 func (m *JobManager) Start(parent context.Context, timeout time.Duration,
@@ -68,9 +71,7 @@ func (m *JobManager) Start(parent context.Context, timeout time.Duration,
 	m.jobs[id] = &Job{ID: id, Kind: kind, Status: JobRunning, CreatedAt: time.Now(), Meta: meta}
 	m.mu.Unlock()
 
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), timeout)
-	go func() {
-		defer cancel()
+	m.tasks.Go(parent, timeout, func(ctx context.Context) {
 		res, err := fn(ctx)
 		m.mu.Lock()
 		defer m.mu.Unlock()
@@ -88,7 +89,7 @@ func (m *JobManager) Start(parent context.Context, timeout time.Duration,
 		}
 		m.finished = append(m.finished, id)
 		m.evictFinishedLocked()
-	}()
+	})
 	return id
 }
 

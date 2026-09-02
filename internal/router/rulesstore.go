@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"aegisgo/internal/logx"
+	"aegisgo/internal/loop"
 )
 
 // rulesstore: the rules table is the hot-reloadable source of truth. On
@@ -70,36 +71,21 @@ type queryer interface {
 }
 
 // StartHotReload periodically re-reads the rules table and swaps the live
-// set. reloadEvery <= 0 disables it. The returned stop function ends the
-// loop. A bad row set keeps the previous rules (log, don't crash).
-func StartHotReload(r *Router, q queryer, reloadEvery time.Duration, logger *slog.Logger) (stop func()) {
+// set (every tick bounded to 5s; reloadEvery <= 0 disables it). The
+// returned stop is idempotent, and the loop also exits when ctx is
+// canceled. A bad row set keeps the previous rules (log, don't crash).
+func StartHotReload(ctx context.Context, r *Router, q queryer, reloadEvery time.Duration, logger *slog.Logger) (stop func()) {
 	logger = logx.Or(logger)
-	if reloadEvery <= 0 {
-		return func() {}
-	}
-	done := make(chan struct{})
-	go func() {
-		t := time.NewTicker(reloadEvery)
-		defer t.Stop()
-		for {
-			select {
-			case <-t.C:
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defs, err := LoadRules(ctx, q)
-				cancel()
-				if err != nil {
-					logger.Error("rules reload failed; keeping previous rules", "error", err)
-					continue
-				}
-				if err := r.Swap(defs); err != nil {
-					logger.Error("rules swap rejected; keeping previous rules", "error", err)
-					continue
-				}
-				logger.Debug("rules reloaded", "count", len(defs))
-			case <-done:
-				return
-			}
+	return loop.Periodic(ctx, reloadEvery, 5*time.Second, func(ctx context.Context) {
+		defs, err := LoadRules(ctx, q)
+		if err != nil {
+			logger.Error("rules reload failed; keeping previous rules", "error", err)
+			return
 		}
-	}()
-	return func() { close(done) }
+		if err := r.Swap(defs); err != nil {
+			logger.Error("rules swap rejected; keeping previous rules", "error", err)
+			return
+		}
+		logger.Debug("rules reloaded", "count", len(defs))
+	})
 }

@@ -21,6 +21,7 @@ import (
 	"aegisgo/internal/logx"
 	"aegisgo/internal/server"
 	"aegisgo/internal/store"
+	"aegisgo/internal/task"
 )
 
 // serveCmd parses serve flags (--tier) and delegates to serve.
@@ -64,11 +65,15 @@ func serve(ctx context.Context, tierFlag string) error {
 	}
 	defer cleanup()
 
+	// One task group for every detached run (REST + gRPC async answers) so
+	// shutdown can join them for real instead of guessing with a sleep.
+	tasks := &task.Group{}
 	srv := &http.Server{
 		Addr: cfg.Addr,
 		Handler: server.Handler(server.Deps{
 			Engine: a.Engine, Answers: a.Store, Readiness: a.Store, Stats: a.Store,
 			Webhook: a.Webhook, // nil unless Telegram runs in webhook mode
+			Tasks:   tasks,
 			Logger:  logger,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
@@ -89,7 +94,7 @@ func serve(ctx context.Context, tierFlag string) error {
 			return err
 		}
 		grpcSrv = grpc.NewServer()
-		grpcapi.Register(grpcSrv, grpcapi.New(a.Engine, a.Store, a.Store, logger))
+		grpcapi.Register(grpcSrv, grpcapi.New(a.Engine, a.Store, a.Store, tasks, logger))
 		go func() {
 			logger.Info("listening", "addr", cfg.GRPCAddr, "proto", "grpc")
 			errCh <- grpcSrv.Serve(lis)
@@ -114,9 +119,12 @@ func serve(ctx context.Context, tierFlag string) error {
 		if grpcSrv != nil {
 			grpcSrv.GracefulStop()
 		}
-		// Give in-flight async runs a beat to persist their answers, then
-		// close the store (cleanup drains queued audit writes).
-		time.Sleep(500 * time.Millisecond)
+		// Join in-flight async runs (bounded): their answers must persist
+		// before the store closes (cleanup drains queued audit writes). A
+		// missed join would 404 answers that were already acked with 202.
+		if !tasks.Wait(10 * time.Second) {
+			logger.Warn("shutdown: async runs still in flight after 10s; closing anyway")
+		}
 		return nil
 	}
 }

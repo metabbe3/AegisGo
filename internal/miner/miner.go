@@ -11,10 +11,10 @@ import (
 	"log/slog"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"aegisgo/internal/logx"
+	"aegisgo/internal/loop"
 	"aegisgo/internal/router"
 	"aegisgo/internal/store"
 )
@@ -180,41 +180,17 @@ func synthesizePattern(shape string) (string, bool) {
 	return strings.Join(parts, `\s+`), true
 }
 
-// Start runs Mine periodically (interval <= 0 disables). The returned stop
-// function ends the loop and is idempotent — cleanup closures fire from
-// more than one exit path, and a bare close(done) would panic on the second
-// call (same contract as store.Close). The loop also exits when ctx is
-// canceled, so a canceled boot context leaves no goroutine mining against
-// a store the caller is about to close. Shadow evaluation and hot reload
-// pick new rules up on their own cadences — mining never touches the live
-// router.
+// Start runs Mine periodically (interval <= 0 disables; the per-pass
+// timeout is one minute, deliberately independent of ctx — see
+// loop.Periodic). The loop exits on stop or ctx cancel, so a canceled boot
+// context leaves no goroutine mining against a store the caller is about
+// to close. Shadow evaluation and hot reload pick new rules up on their
+// own cadences — mining never touches the live router.
 func Start(ctx context.Context, st *store.Store, opts Options, interval time.Duration, logger *slog.Logger) (stop func()) {
-	if interval <= 0 {
-		return func() {}
-	}
 	logger = logx.Or(logger)
-	done := make(chan struct{})
-	var stopOnce sync.Once
-	go func() {
-		t := time.NewTicker(interval)
-		defer t.Stop()
-		for {
-			select {
-			case <-t.C:
-				// Per-tick timeout is deliberately independent of ctx: the
-				// boot ctx outlives many ticks, but one slow pass must never
-				// outlive its own minute.
-				mctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-				if _, err := Mine(mctx, st, opts, logger); err != nil {
-					logger.Error("mining pass failed", "error", err)
-				}
-				cancel()
-			case <-ctx.Done():
-				return
-			case <-done:
-				return
-			}
+	return loop.Periodic(ctx, interval, time.Minute, func(mctx context.Context) {
+		if _, err := Mine(mctx, st, opts, logger); err != nil {
+			logger.Error("mining pass failed", "error", err)
 		}
-	}()
-	return func() { stopOnce.Do(func() { close(done) }) }
+	})
 }

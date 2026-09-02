@@ -7,6 +7,7 @@ import (
 	"context"
 	"log/slog"
 	"net"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -19,6 +20,7 @@ import (
 	"aegisgo/internal/logx"
 	pb "aegisgo/internal/pb"
 	"aegisgo/internal/store"
+	"aegisgo/internal/task"
 	"aegisgo/internal/trace"
 )
 
@@ -45,13 +47,19 @@ type Server struct {
 	engine    Engine
 	answers   AnswerStore
 	readiness Readiness
-	logger    *slog.Logger
+	// tasks tracks async-run goroutines so shutdown can join them; nil is
+	// fine for tests (an unjoined group only leaks until process exit).
+	tasks  *task.Group
+	logger *slog.Logger
 }
 
-// New builds the gRPC server implementation.
-func New(e Engine, answers AnswerStore, read Readiness, logger *slog.Logger) *Server {
+// New builds the gRPC server implementation. tasks may be nil (see Server).
+func New(e Engine, answers AnswerStore, read Readiness, tasks *task.Group, logger *slog.Logger) *Server {
 	logger = logx.Or(logger)
-	return &Server{engine: e, answers: answers, readiness: read, logger: logger}
+	if tasks == nil {
+		tasks = &task.Group{}
+	}
+	return &Server{engine: e, answers: answers, readiness: read, tasks: tasks, logger: logger}
 }
 
 // Register wires the Agent service, standard health, and reflection onto a
@@ -94,13 +102,15 @@ func (s *Server) RunAsync(ctx context.Context, req *pb.RunRequest) (*pb.AsyncAck
 	if err := s.answers.PutAnswer(rctx, traceID); err != nil {
 		return nil, status.Errorf(codes.Internal, "queueing answer: %v", err)
 	}
-	go func(ctx context.Context) {
+	// Same 5-minute bound as the REST async path; completion persists on a
+	// fresh context so it survives even a timed-out run.
+	s.tasks.Go(rctx, 5*time.Minute, func(ctx context.Context) {
 		res := s.engine.Run(ctx, req.GetPrompt())
 		st := store.AnswerStatusFor(res.DecisionSource)
 		if err := s.answers.CompleteAnswer(context.Background(), traceID, st, res.Answer); err != nil {
 			s.logger.Error("grpc: completing answer", "trace_id", traceID, "error", err)
 		}
-	}(context.WithoutCancel(rctx)) // outlive the RPC, keep trace values
+	}) // detached: outlives the RPC, keeps trace values
 	return &pb.AsyncAck{TraceId: traceID, Status: store.AnswerPending}, nil
 }
 

@@ -96,7 +96,7 @@ func openStore(t *testing.T) *store.Store {
 
 func newClient(t *testing.T, e Engine, st *store.Store) pb.AgentClient {
 	t.Helper()
-	return newCustomClient(t, New(e, st, st, nil))
+	return newCustomClient(t, New(e, st, st, nil, nil))
 }
 
 // newCustomClient serves a hand-built Server over an in-memory connection,
@@ -187,7 +187,7 @@ func TestServeOnRealListener(t *testing.T) {
 	}
 
 	serveErr := make(chan error, 1)
-	go func() { serveErr <- Serve(lis, New(&fakeEngine{}, st, st, nil)) }()
+	go func() { serveErr <- Serve(lis, New(&fakeEngine{}, st, st, nil, nil)) }()
 
 	conn, err := grpc.NewClient("passthrough:///"+lis.Addr().String(),
 		grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -284,7 +284,7 @@ func TestRunAsyncPutAnswerFails(t *testing.T) {
 		st := openStore(t)
 		fa := newFakeAnswers(st)
 		fa.putErr = errors.New("answers table locked")
-		c := newCustomClient(t, New(&fakeEngine{}, fa, st, quietLogger()))
+		c := newCustomClient(t, New(&fakeEngine{}, fa, st, nil, quietLogger()))
 
 		_, err := c.RunAsync(context.Background(), &pb.RunRequest{Prompt: "story"})
 		if status.Code(err) != codes.Internal {
@@ -295,7 +295,7 @@ func TestRunAsyncPutAnswerFails(t *testing.T) {
 		st := openStore(t)
 		fa := newFakeAnswers(st)
 		fa.completeErr = errors.New("disk full")
-		c := newCustomClient(t, New(&fakeEngine{}, fa, st, quietLogger()))
+		c := newCustomClient(t, New(&fakeEngine{}, fa, st, nil, quietLogger()))
 
 		ack, err := c.RunAsync(context.Background(), &pb.RunRequest{Prompt: "story"})
 		if err != nil {
@@ -328,7 +328,7 @@ func TestGetAnswerUnknownTrace(t *testing.T) {
 
 func TestGetAnswerStoreError(t *testing.T) {
 	st := openStore(t)
-	c := newCustomClient(t, New(&fakeEngine{}, st, st, nil))
+	c := newCustomClient(t, New(&fakeEngine{}, st, st, nil, nil))
 	// A closed store makes every read fail; the server must surface that as
 	// Internal rather than crash or lie with NotFound.
 	if err := st.Close(); err != nil {
@@ -342,7 +342,7 @@ func TestGetAnswerStoreError(t *testing.T) {
 
 func TestReadyOK(t *testing.T) {
 	// Nil readiness: nothing to ping, so the server reports ready.
-	c := newCustomClient(t, New(&fakeEngine{}, openStore(t), nil, nil))
+	c := newCustomClient(t, New(&fakeEngine{}, openStore(t), nil, nil, nil))
 	r, err := c.Ready(context.Background(), nil)
 	if err != nil || !r.Ready {
 		t.Errorf("ready = %+v err = %v, want ready", r, err)
@@ -351,7 +351,7 @@ func TestReadyOK(t *testing.T) {
 
 func TestReadyStoreDown(t *testing.T) {
 	st := openStore(t)
-	c := newCustomClient(t, New(&fakeEngine{}, st, st, nil))
+	c := newCustomClient(t, New(&fakeEngine{}, st, st, nil, nil))
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}

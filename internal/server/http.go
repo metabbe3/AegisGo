@@ -16,6 +16,7 @@ import (
 	"aegisgo/internal/engine"
 	"aegisgo/internal/logx"
 	"aegisgo/internal/store"
+	"aegisgo/internal/task"
 	"aegisgo/internal/trace"
 )
 
@@ -56,7 +57,11 @@ type Deps struct {
 	// handler itself is built by internal/telegram; the server stays
 	// transport-agnostic).
 	Webhook http.Handler
-	Logger  *slog.Logger
+	// Tasks tracks async-run goroutines so shutdown can join them (BC5).
+	// nil is fine for tests and embedders that never wait: Handler fills in
+	// a throwaway group.
+	Tasks  *task.Group
+	Logger *slog.Logger
 }
 
 // Handler builds the HTTP routes.
@@ -70,6 +75,9 @@ type Deps struct {
 //	GET  /v1/answers/{trace}   poll an async answer
 func Handler(d Deps) http.Handler {
 	d.Logger = logx.Or(d.Logger)
+	if d.Tasks == nil {
+		d.Tasks = &task.Group{}
+	}
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -167,13 +175,16 @@ func runAgent(w http.ResponseWriter, r *http.Request, d Deps) {
 			writeError(w, http.StatusInternalServerError, "queueing answer: "+err.Error())
 			return
 		}
-		go func(ctx context.Context) {
+		// Same 5-minute bound as the sync path: a stuck provider call must
+		// not park a pending answer forever. Completion persists on a fresh
+		// context so it survives even a timed-out run.
+		d.Tasks.Go(r.Context(), 5*time.Minute, func(ctx context.Context) {
 			res := d.Engine.Run(ctx, req.Prompt)
 			status := store.AnswerStatusFor(res.DecisionSource)
 			if err := d.Answers.CompleteAnswer(context.Background(), traceID, status, res.Answer); err != nil {
 				d.Logger.Error("completing answer", "trace_id", traceID, "error", err)
 			}
-		}(context.WithoutCancel(r.Context())) // outlive the request, keep trace values
+		}) // detached: outlives the request, keeps trace values
 		writeJSON(w, http.StatusAccepted, map[string]string{"trace_id": traceID, "status": store.AnswerPending})
 		return
 	}

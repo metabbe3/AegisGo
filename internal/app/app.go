@@ -83,7 +83,7 @@ func Build(ctx context.Context, cfg config.Config, tier config.Tier,
 		st.Close()
 		return nil, nil, err
 	}
-	stopReload := router.StartHotReload(rt, st,
+	stopReload := router.StartHotReload(ctx, rt, st,
 		time.Duration(cfg.RulesReloadSecs)*time.Second, logger)
 
 	// Self-mining: fallback corpus → shadow rules → promotion via the
