@@ -1,16 +1,10 @@
-// Command aegis-serve runs the AegisGo hybrid agent as a long-lived HTTP
-// service for other microservices to call (see internal/server): sync and
-// async runs, health/readiness probes, trace IDs on every request.
-// Designed to run as a systemd unit on a Linux server — single binary, no
-// runtime deps, router-first so it stays useful even when the provider is
-// down (AEGIS_LLM=off).
-package main
+package cli
 
 import (
 	"context"
 	"errors"
 	"flag"
-	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -28,16 +22,23 @@ import (
 	"aegisgo/internal/store"
 )
 
-func main() {
-	tierFlag := flag.String("tier", "smart", "model tier: fast or smart (see AEGIS_MODEL_FAST / AEGIS_MODEL_SMART)")
-	flag.Parse()
-
-	if err := serve(context.Background(), *tierFlag); err != nil {
-		fmt.Fprintln(os.Stderr, "aegis-serve:", err)
-		os.Exit(1)
+// serveCmd parses serve flags (--tier) and delegates to serve.
+func serveCmd(ctx context.Context, args []string, stderr io.Writer) error {
+	fs := flag.NewFlagSet("aegis serve", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	tierFlag := fs.String("tier", "smart", "model tier: fast or smart (see AEGIS_MODEL_FAST / AEGIS_MODEL_SMART)")
+	if err := fs.Parse(args); err != nil {
+		return err
 	}
+	return serve(ctx, *tierFlag)
 }
 
+// serve runs the hybrid agent as a long-lived HTTP service for other
+// microservices to call (see internal/server): sync and async runs,
+// health/readiness probes, trace IDs on every request. Designed to run as
+// a systemd unit on a Linux server — single binary, no runtime deps,
+// router-first so it stays useful even when the provider is down
+// (AEGIS_LLM=off).
 func serve(ctx context.Context, tierFlag string) error {
 	tier, err := config.ParseTier(tierFlag)
 	if err != nil {

@@ -50,6 +50,11 @@ func Build(ctx context.Context, cfg config.Config, tier config.Tier,
 	set, err := tools.Builtin(tools.Options{
 		Workspace: cfg.WorkspaceDir(),
 		SQL:       tools.SQLOptions{DSN: cfg.SQLDSN, Path: cfg.DBPath, Mode: cfg.SQLMode},
+		Download: tools.DownloadOptions{
+			TimeoutSecs:  cfg.DownloadTimeoutSecs,
+			MaxBytes:     cfg.DownloadMaxBytes,
+			AllowPrivate: cfg.DownloadAllowPrivate,
+		},
 	})
 	if err != nil {
 		st.Close()
@@ -92,6 +97,8 @@ func Build(ctx context.Context, cfg config.Config, tier config.Tier,
 	// AEGIS_LLM=off boots a router-only agent with zero credentials.
 	var llm engine.LLMRunner
 	model := ""
+	var classifier engine.Classifier
+	var classifierModel string
 	if !cfg.LLMDisabled() {
 		if err := cfg.Validate(); err != nil {
 			stopReload()
@@ -108,6 +115,31 @@ func Build(ctx context.Context, cfg config.Config, tier config.Tier,
 		}
 		llm = a
 		model = cfg.ModelFor(tier)
+
+		// Dify-style fast tier (AEGIS_CLASSIFIER=on): a second agent at the
+		// fast tier, built TOOL-LESS on purpose. The classify call is pure
+		// text-in/JSON-out (the catalog rides in the prompt); AegisGo
+		// executes the chosen tool itself through the schema-validated
+		// FuncTool path — one execution, no agent self-execution, and no
+		// external MCP surfaces the classifier could steer. Without a
+		// distinct fast model there is nothing to save, so we warn and boot
+		// without it.
+		if cfg.ClassifierEnabled() {
+			if fast := cfg.ModelFor(config.TierFast); fast == "" {
+				logger.Warn("AEGIS_CLASSIFIER=on but no fast model configured — set AEGIS_MODEL_FAST; classifier disabled")
+			} else {
+				fa, err := provider.New(cfg, config.TierFast, nil, logger)
+				if err != nil {
+					stopReload()
+					releaseMCP()
+					st.Close()
+					return nil, nil, fmt.Errorf("building classifier: %w", err)
+				}
+				classifier = &appClassifier{llm: fa, reg: reg}
+				classifierModel = fast
+				logger.Info("classifier tier active (AEGIS_CLASSIFIER=on)", "model", fast)
+			}
+		}
 	} else {
 		logger.Info("LLM fallback disabled (AEGIS_LLM=off) — router-only mode")
 	}
@@ -120,7 +152,8 @@ func Build(ctx context.Context, cfg config.Config, tier config.Tier,
 	}
 
 	// Telegram interface: fully built, dormant until a token is set.
-	eng := &engine.Engine{Router: rt, LLM: llm, Store: st, IFace: iface, Model: model}
+	eng := &engine.Engine{Router: rt, LLM: llm, Classifier: classifier,
+		ClassifierModel: classifierModel, Store: st, IFace: iface, Model: model}
 	var webhook http.Handler
 	var stopTelegram func()
 	if cfg.TelegramEnabled() {

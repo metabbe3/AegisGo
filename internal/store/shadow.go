@@ -65,7 +65,7 @@ func (s *Store) SetRuleState(ctx context.Context, rule, state string, enabled bo
 		state, boolToInt(enabled), rule)
 }
 
-// RuleStates lists every rule with its state (aegisctl `rules list`).
+// RuleStates lists every rule with its state (`aegis ctl rules list`).
 func (s *Store) RuleStates(ctx context.Context) ([]map[string]any, error) {
 	rows, err := s.Query(ctx,
 		`SELECT name, pattern, tool, origin, state, enabled FROM rules ORDER BY origin, name`)

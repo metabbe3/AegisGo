@@ -3,7 +3,7 @@ package store
 import "context"
 
 // StatsSnapshot is the observability surface shared by GET /v1/stats and
-// `aegisctl stats`. DeflectionRate is the headline metric: the fraction of
+// `aegis ctl stats`. DeflectionRate is the headline metric: the fraction of
 // runs answered by the deterministic router at zero LLM cost.
 type StatsSnapshot struct {
 	TotalRuns      int              `json:"total_runs"`

@@ -54,7 +54,7 @@ safety) is already done.
 | Serving | REST (sync + async-poll + **SSE streaming** + /stats), **gRPC** (Run/RunAsync/GetAnswer/Ready + health + reflection); systemd unit |
 | **Telegram** | dual-transport (webhook or long-poll, one dispatcher), dormant until `AEGIS_TELEGRAM_TOKEN`; at-least-once + idempotent replies on update_id; placeholder-then-edit UX; chat allowlist + per-chat rate limit |
 | **Self-mining rules** | fallback corpus → shadow rules (tool-choice comparison) → auto-promotion / auto-demotion; 1% permanent sampling on promoted rules |
-| Admin | `aegisctl` — rules list/mine/promote/demote, stats, replay |
+| Admin | `aegis ctl` — rules list/mine/promote/demote, stats, replay |
 | Durable substrate | embedded SQLite: audit trail, rules + lifecycle, fallback corpus, shadow events, answers, telegram inbox; single-writer batcher |
 
 ## Scope Boundaries
@@ -92,3 +92,43 @@ Three stacked mechanisms, all shipped:
 - Supporting every agent SDK — one loop (agent-framework-go), one MCP
   library (mcp-go), chosen deliberately and documented in CLAUDE.md.
 - Inline shell execution, ever. The system_command catalog is fixed-argv.
+
+## Prior art: Hermes Agents & Dify (research notes, 2026-09)
+
+Two architectures were researched against primary sources before adding
+the classifier tier and merging the binaries; both informed the design.
+
+**Hermes Agents** (NousResearch/hermes-agent, MIT) is the token-cost
+cautionary tale: a single-tier harness where *every* message pays an LLM
+call plus a large fixed prompt — SOUL.md identity + context files with
+20,000-character floors, 60-70 tool schemas in context, full conversation
+replay — and its only relief (context compression) triggers at 50% of the
+context window and is itself an LLM pass. Mitigations exist (prompt-cache
+discipline over a byte-stable prefix, `delegate_task` subagents returning
+only summaries, a `tool_search` bridge to defer schema injection), but
+they discount a per-message toll rather than removing it. What AegisGo
+takes from Hermes: keep the system prompt tiny and byte-stable
+(cache-friendly), bound tool output, and never inject memory/persona
+context per message. What it rejects: the per-message toll itself.
+
+**Dify** (langgenius/dify) is two-tier by construction: a cheap-model
+**Question-Classify** node — one fixed compact prompt, exactly one LLM
+call, robust JSON parsing with a deterministic fallback class — routes to
+branches; known paths run through deterministic nodes (if/else, code,
+HTTP) at zero LLM cost, and expensive models are confined to nodes that
+genuinely generate. Every node records token/price telemetry. AegisGo's
+router→fallback split was already this shape; the classifier tier
+(`AEGIS_CLASSIFIER=on`, `decision_source=llm_classifier`) adds Dify's
+missing middle: one `AEGIS_MODEL_FAST` call picks a native tool on a
+router miss, executes it through the schema-validated tool path, and —
+because hits are tool-choice-labeled corpus — recurring shapes graduate
+via the miner into regex rules: known patterns decay from one cheap call
+to zero LLM calls. Declining (freeform, unparseable, hallucinated tool,
+rejected args) always falls through to the smart LLM, never errors —
+Dify's deterministic-fallback lesson.
+
+Sources: hermes-agent.nousresearch.com/docs (architecture, prompt
+assembly, context compression & caching, tool search, tips);
+github.com/NousResearch/hermes-agent; docs.dify.ai (workflow-chatflow,
+question-classifier, if/else, code, HTTP, agent nodes);
+github.com/langgenius/dify (`dify_graph/nodes/question_classifier`).

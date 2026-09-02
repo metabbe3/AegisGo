@@ -7,15 +7,15 @@ project is, WORKFLOW.md for how changes are made.
 ## Commands
 
 ```bash
-make build        # compile bin/aegis-agent and bin/aegis-serve
+make build        # compile bin/aegis (agent/serve/ctl) and bin/mcp-echo-server
 make test         # go test ./...          — no network, no API keys needed
 make vet          # go vet ./...
 make cover        # unit tests with coverage gate (fails below 90%)
 make check        # no TODO/FIXME, no skipped tests, every non-generated pkg tested
 make e2e          # staged macOS end-to-end run (scripts/e2e.sh)
-go run ./cmd/aegis-agent "/uptime"       # router hit: instant, zero LLM cost
-AEGIS_LLM=off go run ./cmd/aegis-serve   # router-only mode, no credentials needed
-go run ./cmd/aegis-serve                 # HTTP service on :8080
+go run ./cmd/aegis agent "/uptime"       # router hit: instant, zero LLM cost
+AEGIS_LLM=off go run ./cmd/aegis serve   # router-only mode, no credentials needed
+go run ./cmd/aegis serve                 # HTTP service on :8080
 ```
 
 Run `make vet && make test` before declaring any change done. Both must pass.
@@ -25,13 +25,18 @@ the in-process MCP transport instead.
 ## Architecture Map
 
 ```
-cmd/aegis-agent          CLI: one-shot prompt or interactive REPL
-cmd/aegis-serve          HTTP service (see internal/server), graceful shutdown
+cmd/aegis               thin shim for the single binary (logic in internal/cli)
+internal/cli            subcommands: agent (one-shot/REPL), serve (HTTP+gRPC daemon),
+                         ctl (rules/stats/replay admin), version
 internal/app             shared wiring: store → tools → registry → router → engine
-internal/engine          hybrid pipeline: router first, LLM fallback, audit (§ decision_source)
+internal/engine          hybrid pipeline: router → optional fast-tier
+                         classifier (llm_classifier) → LLM fallback, audit
+                         (§ decision_source)
 internal/router          deterministic rules: anchored regex → tool Execute; hot reload
 internal/tools           common Tool interface + read_csv, csv_stats, read_doc,
-                         system_command (fixed-argv catalog), sql_query (ro by default)
+                         system_command (fixed-argv catalog), sql_query (ro by default),
+                         make_dir, list_dir, download (background jobs: jobs.go
+                         manager, job_status polling, SSRF-guarded)
 internal/store           embedded SQLite: audit trail, rules table, fallback corpus,
                          async answers; single-writer batcher
 internal/server          REST: /healthz /readyz /v1/agent/run (sync|?async=1|?stream=1 SSE) /v1/answers/{id} /v1/stats, optional webhook mount
@@ -43,17 +48,29 @@ internal/provider        env-switched agent factory (openai | openai-compat | an
 internal/trace           trace-ID minting/propagation (joins logs, audit rows, answers)
 internal/config          env parsing, validation, fast/smart model tiers
 examples/mcp-echo-server reference for the MCP SERVER side (mcp-go)
+docs/                   memory that survives /clear: research/ (sourced findings),
+                         lessons-learned.md (append-only), decisions/ (ADRs),
+                         handoff.md — read handoff.md before continuing prior work
 testdata/                fixtures used by unit tests
 reference/               gitignored shallow clones of upstream libs — read, never import
 ```
 
 Request flow (every interface): trace.New → engine.Run → router (regex match?
-execute tool natively, decision_source=regex_router) → else LLM fallback
-(decision_source=llm, event persisted as Phase-3 mining corpus) → audit row +
-slog line. `AEGIS_LLM=off` makes misses return fast (llm_disabled) — the
-router keeps serving with zero credentials.
+execute tool natively, decision_source=regex_router) → else the optional
+fast-tier classifier (AEGIS_CLASSIFIER=on: one AEGIS_MODEL_FAST call picks a
+native tool, decision_source=llm_classifier; a decline falls through) → else
+LLM fallback (decision_source=llm, event persisted as Phase-3 mining corpus;
+classifier hits are corpus too, tools_used-labeled) → audit row + slog line.
+`AEGIS_LLM=off` makes misses return fast (llm_disabled) — the router keeps
+serving with zero credentials.
 
 ## Hard Rules
+
+0. **Finding code — search order (do not explore by reading).** By
+   meaning ("where do we handle X?") → the lumen `semantic_search` MCP
+   tool first. Exact symbol/definition/references → LSP. Exact string →
+   grep. Sequentially reading files to locate code is the last resort,
+   not the default.
 
 1. **Stdlib-first.** One exception so far: `modernc.org/sqlite` (pure Go,
    keeps CGO_ENABLED=0). Any other dependency needs a stated reason in the
@@ -73,8 +90,8 @@ router keeps serving with zero credentials.
    (`Audit`, `RecordFallback`) enqueue and never block the request path.
    Only rare admin writes (rule seeding) use the blocking `Exec`.
 6. **Every run reports a decision_source.** `regex_router`, `llm`,
-   `llm_disabled`, `error` — in the slog line AND the audit row, keyed by
-   trace_id. New code paths keep this contract.
+   `llm_classifier`, `llm_disabled`, `error` — in the slog line AND the
+   audit row, keyed by trace_id. New code paths keep this contract.
 7. **Tools implement the common interface** (`internal/tools/tool.go`):
    `Execute(ctx, json.RawMessage)` for deterministic callers, `FuncTool()`
    for the LLM. One typed handler, two entry points, same result (there's a
@@ -131,3 +148,7 @@ router keeps serving with zero credentials.
 3. Router-rule or tool changes update the seeded-rules help text (cmd
    repl banner) and WORKFLOW.md recipes.
 4. No secrets, no `.env` files, no `reference/` imports in code.
+5. The simplify pass ran before commit (/simplify · code-simplifier):
+   reuse over duplication, no dead code, honest names. Extract on the
+   third duplication, not the first — premature abstraction is its own
+   bug.

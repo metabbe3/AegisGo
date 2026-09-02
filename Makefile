@@ -1,5 +1,4 @@
-BINARY_AGENT := aegis-agent
-BINARY_SERVE := aegis-serve
+BINARY := aegis
 
 .PHONY: build test vet lint proto run-agent run-serve clone-refs tidy clean
 
@@ -10,10 +9,9 @@ proto:
 		--go-grpc_out=./internal/pb --go-grpc_opt=paths=source_relative \
 		internal/pb/agent.proto
 
-## build: compile aegis-agent, aegis-serve, and mcp-echo-server into ./bin
+## build: compile the single aegis binary (agent/serve/ctl) and mcp-echo-server into ./bin
 build:
-	go build -o bin/$(BINARY_AGENT) ./cmd/aegis-agent
-	go build -o bin/$(BINARY_SERVE) ./cmd/aegis-serve
+	go build -o bin/$(BINARY) ./cmd/aegis
 	go build -o bin/mcp-echo-server ./examples/mcp-echo-server
 
 ## test: run all unit tests
@@ -69,11 +67,11 @@ e2e:
 
 ## run-agent: run the CLI agent against testdata (needs provider env vars)
 run-agent:
-	go run ./cmd/aegis-agent
+	go run ./cmd/aegis agent
 
 ## run-serve: run the HTTP agent service locally on :8080
 run-serve:
-	go run ./cmd/aegis-serve
+	go run ./cmd/aegis serve
 
 ## clone-refs: shallow-clone upstream libraries into reference/ for offline reading
 clone-refs:

@@ -79,7 +79,9 @@ func clearConfigEnv(t *testing.T) {
 		"AEGIS_MINER_INTERVAL", "AEGIS_TELEGRAM_TOKEN", "AEGIS_TELEGRAM_CHATS",
 		"AEGIS_TELEGRAM_MODE", "AEGIS_TELEGRAM_WEBHOOK_URL",
 		"AEGIS_TELEGRAM_WEBHOOK_SECRET", "AEGIS_TELEGRAM_WORKERS",
-		"AEGIS_TELEGRAM_API_BASE",
+		"AEGIS_TELEGRAM_API_BASE", "AEGIS_DOWNLOAD_TIMEOUT",
+		"AEGIS_DOWNLOAD_MAX_BYTES", "AEGIS_DOWNLOAD_ALLOW_PRIVATE",
+		"AEGIS_CLASSIFIER",
 	} {
 		t.Setenv(k, "")
 	}
@@ -103,6 +105,11 @@ func TestLoadDefaults(t *testing.T) {
 
 		TelegramMode:    "auto",
 		TelegramWorkers: 4,
+
+		DownloadTimeoutSecs: 120,
+		DownloadMaxBytes:    int64(64 << 20),
+
+		Classifier: "off",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Load() with cleared env mismatch:\n got  %+v\n want %+v", got, want)
@@ -148,6 +155,10 @@ func TestLoadFromEnv(t *testing.T) {
 	t.Setenv("AEGIS_TELEGRAM_WEBHOOK_SECRET", " s3cr3t ")
 	t.Setenv("AEGIS_TELEGRAM_WORKERS", " 9 ")
 	t.Setenv("AEGIS_TELEGRAM_API_BASE", " http://127.0.0.1:8081 ")
+	t.Setenv("AEGIS_DOWNLOAD_TIMEOUT", " 45 ")
+	t.Setenv("AEGIS_DOWNLOAD_MAX_BYTES", " 2048 ")
+	t.Setenv("AEGIS_DOWNLOAD_ALLOW_PRIVATE", " on ")
+	t.Setenv("AEGIS_CLASSIFIER", " on ")
 
 	got := Load()
 	want := Config{
@@ -182,6 +193,12 @@ func TestLoadFromEnv(t *testing.T) {
 		TelegramWebhookSecret: "s3cr3t",
 		TelegramWorkers:       9,
 		TelegramAPIBase:       "http://127.0.0.1:8081",
+
+		DownloadTimeoutSecs:  45,
+		DownloadMaxBytes:     2048,
+		DownloadAllowPrivate: true,
+
+		Classifier: "on",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Load() from env mismatch:\n got  %+v\n want %+v", got, want)
@@ -241,6 +258,22 @@ func TestLLMDisabledCaseFold(t *testing.T) {
 	for _, llm := range []string{"on", "", "off-now"} {
 		if (Config{LLM: llm}).LLMDisabled() {
 			t.Errorf("LLM=%q must not count as disabled", llm)
+		}
+	}
+}
+
+func TestClassifierEnabled(t *testing.T) {
+	if (Config{}).ClassifierEnabled() {
+		t.Error("default must keep the classifier off")
+	}
+	for _, v := range []string{"on", "ON", "On"} {
+		if !(Config{Classifier: v}).ClassifierEnabled() {
+			t.Errorf("Classifier=%q must count as enabled", v)
+		}
+	}
+	for _, v := range []string{"", "off", "maybe"} {
+		if (Config{Classifier: v}).ClassifierEnabled() {
+			t.Errorf("Classifier=%q must count as disabled", v)
 		}
 	}
 }

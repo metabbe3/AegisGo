@@ -1,13 +1,4 @@
-// Command aegisctl is the offline admin tool: it operates directly on the
-// AegisGo database (no server needed) to list/promote/demote router rules,
-// run the miner on demand, print stats, and replay a trace.
-//
-//	aegisctl rules list
-//	aegisctl rules mine [--threshold N]
-//	aegisctl rules promote <name> | demote <name>
-//	aegisctl stats
-//	aegisctl replay <trace-id>
-package main
+package cli
 
 import (
 	"context"
@@ -15,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"text/tabwriter"
 
 	"aegisgo/internal/config"
@@ -23,16 +13,16 @@ import (
 	"aegisgo/internal/store"
 )
 
-func main() {
-	if err := run(os.Args[1:], os.Stdout); err != nil {
-		fmt.Fprintln(os.Stderr, "aegisctl:", err)
-		os.Exit(1)
-	}
-}
-
-// run dispatches one admin subcommand against the database at AEGIS_DB_PATH.
-// stdout is injected (tabwriter target) so tests can capture the tables.
-func run(args []string, stdout io.Writer) error {
+// runCtl is the offline admin tool: it operates directly on the AegisGo
+// database (no server needed) to list/promote/demote router rules, run the
+// miner on demand, print stats, and replay a trace.
+//
+//	aegis ctl rules list
+//	aegis ctl rules mine [--threshold N]
+//	aegis ctl rules promote <name> | demote <name>
+//	aegis ctl stats
+//	aegis ctl replay <trace-id>
+func runCtl(args []string, stdout io.Writer) error {
 	cfg := config.Load()
 	st, err := store.Open(cfg.DBPath)
 	if err != nil {
@@ -42,7 +32,7 @@ func run(args []string, stdout io.Writer) error {
 	ctx := context.Background()
 
 	if len(args) == 0 {
-		return usage()
+		return ctlUsage()
 	}
 	switch args[0] {
 	case "rules":
@@ -51,21 +41,21 @@ func run(args []string, stdout io.Writer) error {
 		return statsCmd(ctx, st, stdout)
 	case "replay":
 		if len(args) != 2 {
-			return fmt.Errorf("usage: aegisctl replay <trace-id>")
+			return fmt.Errorf("usage: aegis ctl replay <trace-id>")
 		}
 		return replayCmd(ctx, st, args[1], stdout)
 	default:
-		return usage()
+		return ctlUsage()
 	}
 }
 
-func usage() error {
-	return fmt.Errorf("usage: aegisctl rules list|mine|promote <name>|demote <name> | stats | replay <trace-id>")
+func ctlUsage() error {
+	return fmt.Errorf("usage: aegis ctl rules list|mine|promote <name>|demote <name> | stats | replay <trace-id>")
 }
 
 func rulesCmd(ctx context.Context, st *store.Store, cfg config.Config, args []string, stdout io.Writer) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: aegisctl rules list|mine|promote <name>|demote <name>")
+		return fmt.Errorf("usage: aegis ctl rules list|mine|promote <name>|demote <name>")
 	}
 	switch args[0] {
 	case "list":
@@ -101,12 +91,12 @@ func rulesCmd(ctx context.Context, st *store.Store, cfg config.Config, args []st
 		return nil
 	case "promote":
 		if len(args) != 2 {
-			return fmt.Errorf("usage: aegisctl rules promote <name>")
+			return fmt.Errorf("usage: aegis ctl rules promote <name>")
 		}
 		return st.SetRuleState(ctx, args[1], store.RuleStateActive, true)
 	case "demote":
 		if len(args) != 2 {
-			return fmt.Errorf("usage: aegisctl rules demote <name>")
+			return fmt.Errorf("usage: aegis ctl rules demote <name>")
 		}
 		return st.SetRuleState(ctx, args[1], store.RuleStateDemoted, false)
 	default:

@@ -30,5 +30,22 @@ func Seeded() []RuleDef {
 			ArgsTemplate: `{"path":"$1"}`, Origin: "seed"},
 		{Name: "csv_summary", Pattern: `/csv_summary\s+(\S+)`, Tool: "csv_stats",
 			ArgsTemplate: `{"path":"$1"}`, Origin: "seed"},
+		// File tools: workspace paths, shape-validated captures. The
+		// patterns intentionally allow ".."-shaped captures — resolvePath /
+		// resolveNewPath are the security backstop (same contract as
+		// csv_head above). "to" in download is optional but keeps the
+		// pattern anchored and shape-checked; both captures splice in the
+		// quoted "$N" form.
+		{Name: "mkdir", Pattern: `/mkdir\s+([A-Za-z0-9._][A-Za-z0-9._/-]*)`, Tool: "make_dir",
+			ArgsTemplate: `{"path":"$1"}`, Origin: "seed"},
+		{Name: "download", Pattern: `/download\s+(https?://[^\s]+)\s+(?:to\s+)?([A-Za-z0-9._][A-Za-z0-9._/-]*)`, Tool: "download",
+			ArgsTemplate: `{"url":"$1","path":"$2"}`, Origin: "seed"},
+		// Specific form (with a path) precedes the bare /ls general form.
+		{Name: "list_dir", Pattern: `/(?:ls|list)\s+([A-Za-z0-9._][A-Za-z0-9._/-]*)`, Tool: "list_dir",
+			ArgsTemplate: `{"path":"$1"}`, Origin: "seed"},
+		{Name: "ls_root", Pattern: `/ls`, Tool: "list_dir",
+			ArgsTemplate: `{"path":"."}`, Origin: "seed"},
+		{Name: "job_status", Pattern: `/jobs?\s+([A-Za-z0-9_-]+)`, Tool: "job_status",
+			ArgsTemplate: `{"job_id":"$1"}`, Origin: "seed"},
 	}
 }

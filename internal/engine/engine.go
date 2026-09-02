@@ -25,6 +25,16 @@ type LLMRunner interface {
 	RunText(ctx context.Context, msg string, options ...agent.Option) agent.ResponseStream
 }
 
+// Classifier is the fast tier consulted on router misses BEFORE the smart
+// LLM (Dify's question-classify pattern): one cheap call that either
+// resolves the prompt by picking a native tool (ok=true, answer returned)
+// or declines. Implementations must never fail loudly — declining simply
+// falls through to the LLM fallback, exactly like Dify's deterministic
+// first-class fallback.
+type Classifier interface {
+	Classify(ctx context.Context, prompt string) (answer, tool string, ok bool)
+}
+
 // Result is one completed run.
 type Result struct {
 	Answer         string
@@ -38,11 +48,17 @@ type Result struct {
 // rule to active. A field so tests (and only tests) can lower it.
 var PromoteAfter = 5
 
-// Engine wires the router, the optional LLM fallback, and the audit store.
+// Engine wires the router, the optional fast-tier classifier, the LLM
+// fallback, and the audit store.
 type Engine struct {
 	Router *router.Router
 	LLM    LLMRunner // nil => AEGIS_LLM=off: misses return fast
-	Store  *store.Store
+	// Classifier is the optional fast tier on router misses (nil = off).
+	// It only ever runs when the LLM is on — the kill switch is absolute.
+	Classifier Classifier
+	// ClassifierModel names the fast-tier model on audit rows ("" when off).
+	ClassifierModel string
+	Store           *store.Store
 	// IFace labels audit rows ("cli", "rest", …) — the engine's default.
 	// Interfaces sharing one engine override per call via WithIFace.
 	IFace string
@@ -89,6 +105,31 @@ func (e *Engine) Run(ctx context.Context, prompt string) Result {
 			Prompt: prompt, LatencyMS: ms(time.Since(start)),
 		})
 		return res
+	}
+
+	// 2.5 Fast tier: on a miss, the classifier may resolve the prompt with
+	//     one cheap native-tool call (AEGIS_CLASSIFIER=on). Only reachable
+	//     when the LLM is on; declining falls through to the fallback below.
+	if !d.Handled && e.Classifier != nil {
+		if answer, tool, ok := e.Classifier.Classify(ctx, prompt); ok {
+			latency := ms(time.Since(start))
+			// Classifier hits are tool-choice-labeled corpus: the miner
+			// graduates recurring shapes into regex rules, so known
+			// patterns decay from one cheap call to zero LLM calls.
+			e.Store.RecordFallback(store.FallbackEvent{
+				TraceID:          traceID,
+				NormalizedPrompt: store.NormalizePrompt(prompt),
+				RawPrompt:        prompt,
+				ToolsUsed:        tool,
+				Model:            e.ClassifierModel,
+			})
+			e.audit(ctx, store.AuditEvent{
+				TraceID: traceID, DecisionSource: store.SourceLLMClassifier,
+				Prompt: prompt, Model: e.ClassifierModel, LatencyMS: latency,
+			})
+			return Result{Answer: answer, DecisionSource: store.SourceLLMClassifier,
+				TraceID: traceID, LatencyMS: latency}
+		}
 	}
 
 	// 3a. Shadow evaluation: the LLM runs; the rule is compared, not
@@ -193,6 +234,29 @@ func (e *Engine) RunStreaming(ctx context.Context, prompt string, emit func(chun
 		})
 		emitChunks(res.Answer, emit)
 		return res
+	}
+
+	// Fast tier (same placement as Run: miss + LLM on). The deterministic
+	// answer is chunked through the same SSE contract as everything else.
+	if !d.Handled && e.Classifier != nil {
+		if answer, tool, ok := e.Classifier.Classify(ctx, prompt); ok {
+			latency := ms(time.Since(start))
+			e.Store.RecordFallback(store.FallbackEvent{
+				TraceID:          traceID,
+				NormalizedPrompt: store.NormalizePrompt(prompt),
+				RawPrompt:        prompt,
+				ToolsUsed:        tool,
+				Model:            e.ClassifierModel,
+			})
+			e.audit(ctx, store.AuditEvent{
+				TraceID: traceID, DecisionSource: store.SourceLLMClassifier,
+				Prompt: prompt, Model: e.ClassifierModel, LatencyMS: latency,
+			})
+			res := Result{Answer: answer, DecisionSource: store.SourceLLMClassifier,
+				TraceID: traceID, LatencyMS: latency}
+			emitChunks(res.Answer, emit)
+			return res
+		}
 	}
 
 	// LLM fallback: forward deltas as they stream off the provider.

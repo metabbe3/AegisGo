@@ -9,7 +9,7 @@ import (
 
 // WebhookHeader is the header Telegram signs every delivery with; the value
 // equals the secret_token given to setWebhook. The handler mounts at
-// server.WebhookPath in aegis-serve.
+// server.WebhookPath in `aegis serve`.
 const WebhookHeader = "X-Telegram-Bot-Api-Secret-Token"
 
 // NewWebhookHandler builds the webhook transport: a thin shim that checks

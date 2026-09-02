@@ -3,8 +3,7 @@ reference/
 
 # Binaries
 /bin/
-/aegis-agent
-/aegis-serve
+/aegis
 
 # Go
 *.test
@@ -19,3 +18,6 @@ coverage.*
 .DS_Store
 .idea/
 .vscode/
+
+# Browser automation artifacts (chrome-devtools/playwright MCP sessions)
+.playwright-mcp/

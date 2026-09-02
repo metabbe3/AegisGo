@@ -1,4 +1,4 @@
-# systemd unit for aegis-serve — copy to /etc/systemd/system/ and adjust
+# systemd unit for `aegis serve` — copy to /etc/systemd/system/ and adjust
 # User, WorkingDirectory, and the Environment lines to the deployment.
 # Provider/model are env-driven so the same binary serves every environment.
 
@@ -36,7 +36,7 @@ Environment=AEGIS_RULES_RELOAD=30
 # Environment=AEGIS_MCP_SERVERS=stdio:/usr/local/bin/some-mcp-server
 # Secrets: use an EnvironmentFile readable only by this user.
 EnvironmentFile=-/etc/aegisgo.env
-ExecStart=/opt/aegisgo/bin/aegis-serve
+ExecStart=/opt/aegisgo/bin/aegis serve
 Restart=on-failure
 RestartSec=3
 

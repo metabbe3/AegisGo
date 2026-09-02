@@ -65,7 +65,7 @@ type Config struct {
 	// MCP endpoint.
 	MCPServers []string
 
-	// Addr is the listen address for aegis-serve (default ":8080").
+	// Addr is the listen address for `aegis serve` (default ":8080").
 	Addr string
 
 	// GRPCAddr is the gRPC listener address (default ":8081"). Set
@@ -123,6 +123,23 @@ type Config struct {
 	// TelegramAPIBase overrides the Bot API base URL (tests, self-hosted
 	// bot API servers); empty = api.telegram.org.
 	TelegramAPIBase string
+
+	// DownloadTimeoutSecs bounds one background download end-to-end
+	// (AEGIS_DOWNLOAD_TIMEOUT, default 120). Hard validation lives in the
+	// tools layer so it also applies in AEGIS_LLM=off mode.
+	DownloadTimeoutSecs int
+	// DownloadMaxBytes caps each download's size (AEGIS_DOWNLOAD_MAX_BYTES,
+	// default 64 MiB; validation as above).
+	DownloadMaxBytes int64
+	// DownloadAllowPrivate permits loopback/private download URLs
+	// (AEGIS_DOWNLOAD_ALLOW_PRIVATE=on; off by default).
+	DownloadAllowPrivate bool
+
+	// Classifier enables the Dify-style fast tier: on a router miss, one
+	// cheap AEGIS_MODEL_FAST call tries to pick a native tool before the
+	// smart LLM runs (AEGIS_CLASSIFIER=on; off by default). Requires
+	// AEGIS_MODEL_FAST.
+	Classifier string
 }
 
 // Load reads configuration from the environment and applies defaults.
@@ -159,6 +176,11 @@ func Load() Config {
 		TelegramWebhookSecret: strings.TrimSpace(os.Getenv("AEGIS_TELEGRAM_WEBHOOK_SECRET")),
 		TelegramWorkers:       AtoiDefault(os.Getenv("AEGIS_TELEGRAM_WORKERS"), 4),
 		TelegramAPIBase:       strings.TrimSpace(os.Getenv("AEGIS_TELEGRAM_API_BASE")),
+
+		DownloadTimeoutSecs:  AtoiDefault(os.Getenv("AEGIS_DOWNLOAD_TIMEOUT"), 120),
+		DownloadMaxBytes:     int64(AtoiDefault(os.Getenv("AEGIS_DOWNLOAD_MAX_BYTES"), 64<<20)),
+		DownloadAllowPrivate: strings.EqualFold(strings.TrimSpace(os.Getenv("AEGIS_DOWNLOAD_ALLOW_PRIVATE")), "on"),
+		Classifier:           envOr("AEGIS_CLASSIFIER", "off"),
 	}
 }
 
@@ -194,6 +216,10 @@ func parseInt64List(s string) []int64 {
 
 // LLMDisabled reports whether the LLM fallback kill switch is on.
 func (c Config) LLMDisabled() bool { return strings.EqualFold(c.LLM, "off") }
+
+// ClassifierEnabled reports whether the fast-tier classifier should boot.
+// The kill switch stays absolute: AEGIS_LLM=off disables it too.
+func (c Config) ClassifierEnabled() bool { return strings.EqualFold(c.Classifier, "on") }
 
 // GRPCEnabled reports whether the gRPC interface should listen.
 func (c Config) GRPCEnabled() bool {

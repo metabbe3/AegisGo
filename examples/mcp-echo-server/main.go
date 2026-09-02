@@ -2,7 +2,7 @@
 // MCP server with mark3labs/mcp-go (stdio transport). Run it from an MCP
 // client (Claude Desktop, another agent, or AegisGo itself):
 //
-//	AEGIS_MCP_SERVERS="stdio:./mcp-echo-server" aegis-agent
+//	AEGIS_MCP_SERVERS="stdio:./mcp-echo-server" aegis agent
 //
 // It doubles as the reference for the server side of MCP: define tools with
 // mcp.NewTool, register handlers with AddTool, serve over stdio.

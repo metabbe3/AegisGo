@@ -511,3 +511,124 @@ func TestToolNamesAndTokenUsageEdgeInputs(t *testing.T) {
 		t.Errorf("tokenUsage = (%d, %d), want summed counts (8, 4)", in, out)
 	}
 }
+
+// fakeClassifier resolves every miss with a canned payload (or declines),
+// counting calls so tests can prove when the tier runs and when it must not.
+type fakeClassifier struct {
+	calls  int
+	answer string
+	tool   string
+	ok     bool
+}
+
+func (f *fakeClassifier) Classify(_ context.Context, _ string) (string, string, bool) {
+	f.calls++
+	return f.answer, f.tool, f.ok
+}
+
+// TestClassifierResolvesMiss: a miss the classifier resolves answers with
+// decision_source=llm_classifier, writes the audit row with the fast-tier
+// model, and seeds the mining corpus with the tool choice.
+func TestClassifierResolvesMiss(t *testing.T) {
+	e, st := newEngine(t, &fakeLLM{})
+	fc := &fakeClassifier{answer: "classified answer", tool: "read_csv", ok: true}
+	e.Classifier, e.ClassifierModel = fc, "fast-model"
+	_, ctx := trace.New(context.Background(), "")
+
+	res := e.Run(ctx, "please show me the sample orders file")
+	if res.DecisionSource != store.SourceLLMClassifier || res.Answer != "classified answer" {
+		t.Fatalf("res = %+v, want llm_classifier with the classified answer", res)
+	}
+	if fc.calls != 1 {
+		t.Errorf("classifier calls = %d, want 1", fc.calls)
+	}
+	if n := countRows(t, st, `SELECT COUNT(*) FROM audit_events
+		WHERE decision_source='llm_classifier' AND model='fast-model'`); n != 1 {
+		t.Errorf("llm_classifier audit rows = %d, want 1", n)
+	}
+	// The corpus row is what makes patterns graduate into regex rules.
+	if n := countRows(t, st, `SELECT COUNT(*) FROM fallback_events
+		WHERE tools_used='read_csv' AND model='fast-model'`); n != 1 {
+		t.Errorf("classifier corpus rows = %d, want 1", n)
+	}
+}
+
+// TestClassifierDeclineFallsThrough: a declining classifier is invisible —
+// the smart LLM answers with decision_source=llm.
+func TestClassifierDeclineFallsThrough(t *testing.T) {
+	e, st := newEngine(t, &fakeLLM{})
+	fc := &fakeClassifier{ok: false}
+	e.Classifier, e.ClassifierModel = fc, "fast-model"
+	_, ctx := trace.New(context.Background(), "")
+
+	res := e.Run(ctx, "what is the meaning of life?")
+	if res.DecisionSource != store.SourceLLM || res.Answer != "llm answer" {
+		t.Fatalf("res = %+v, want the plain LLM fallback", res)
+	}
+	if fc.calls != 1 {
+		t.Errorf("classifier calls = %d, want 1 (it ran and declined)", fc.calls)
+	}
+	if n := countRows(t, st, `SELECT COUNT(*) FROM audit_events
+		WHERE decision_source='llm_classifier'`); n != 0 {
+		t.Errorf("declined classification left audit rows: %d", n)
+	}
+}
+
+// TestClassifierSkippedWhenLLMOff: the kill switch is absolute — no
+// provider, no classifier, fast llm_disabled answer.
+func TestClassifierSkippedWhenLLMOff(t *testing.T) {
+	e, _ := newEngine(t, nil)
+	fc := &fakeClassifier{answer: "x", tool: "read_csv", ok: true}
+	e.Classifier, e.ClassifierModel = fc, "fast-model"
+	_, ctx := trace.New(context.Background(), "")
+
+	res := e.Run(ctx, "anything at all")
+	if res.DecisionSource != store.SourceLLMOff {
+		t.Fatalf("res = %+v, want llm_disabled", res)
+	}
+	if fc.calls != 0 {
+		t.Errorf("classifier ran %d times under AEGIS_LLM=off", fc.calls)
+	}
+}
+
+// TestClassifierSkippedOnRouterHit: deterministic hits never pay even the
+// fast tier.
+func TestClassifierSkippedOnRouterHit(t *testing.T) {
+	e, _ := newEngine(t, &fakeLLM{})
+	fc := &fakeClassifier{answer: "x", tool: "read_csv", ok: true}
+	e.Classifier, e.ClassifierModel = fc, "fast-model"
+	_, ctx := trace.New(context.Background(), "")
+
+	res := e.Run(ctx, "/uptime")
+	if res.DecisionSource != store.SourceRouter {
+		t.Fatalf("res = %+v, want regex_router", res)
+	}
+	if fc.calls != 0 {
+		t.Errorf("classifier ran on a router hit (%d calls)", fc.calls)
+	}
+}
+
+// TestClassifierStreamingEmits: the streaming path chunk-classifies the
+// same way, through the same SSE contract.
+func TestClassifierStreamingEmits(t *testing.T) {
+	e, st := newEngine(t, &fakeLLM{})
+	fc := &fakeClassifier{answer: "streamed classified answer", tool: "csv_stats", ok: true}
+	e.Classifier, e.ClassifierModel = fc, "fast-model"
+	_, ctx := trace.New(context.Background(), "")
+
+	var chunks []string
+	res := e.RunStreaming(ctx, "summarize the sample file", func(c string) error {
+		chunks = append(chunks, c)
+		return nil
+	})
+	if res.DecisionSource != store.SourceLLMClassifier {
+		t.Fatalf("res = %+v, want llm_classifier", res)
+	}
+	if len(chunks) == 0 || strings.Join(chunks, "") != "streamed classified answer" {
+		t.Errorf("chunks = %q, want the classified answer reassembled", chunks)
+	}
+	if n := countRows(t, st, `SELECT COUNT(*) FROM fallback_events
+		WHERE tools_used='csv_stats'`); n != 1 {
+		t.Errorf("classifier corpus rows = %d, want 1", n)
+	}
+}

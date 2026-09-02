@@ -303,3 +303,124 @@ func TestHandlePromptTooLong(t *testing.T) {
 		t.Error("Text fallback for unmarshalable output returned empty string")
 	}
 }
+
+// TestRouterFileToolRules drives the new file-tool rules end-to-end through
+// the router against a temp workspace: mkdir really creates, ls really
+// lists, and the job_status rule reaches the tool.
+func TestRouterFileToolRules(t *testing.T) {
+	ws := t.TempDir()
+	set, err := tools.Builtin(tools.Options{Workspace: ws})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg, err := tools.NewRegistry(set...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := New(reg, Seeded())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	// /mkdir creates a real directory on disk.
+	d := r.Handle(ctx, "/mkdir data/reports")
+	if !d.Handled || d.RuleID != "mkdir" || d.Err != nil {
+		t.Fatalf("mkdir: %+v", d)
+	}
+	var made struct {
+		Existed bool `json:"existed"`
+	}
+	if err := json.Unmarshal([]byte(d.Text()), &made); err != nil {
+		t.Fatalf("mkdir text not json: %v (%s)", err, d.Text())
+	}
+	if made.Existed {
+		t.Error("fresh dir reported as existing")
+	}
+	if st, err := os.Stat(filepath.Join(ws, "data", "reports")); err != nil || !st.IsDir() {
+		t.Errorf("dir on disk: %v (%v)", st, err)
+	}
+
+	// Escape attempt: the rule matches (pattern allows ".." shapes) but the
+	// tool refuses — same contract as the csv escape test above.
+	if d := r.Handle(ctx, "/mkdir ../escape"); !d.Handled || d.Err == nil {
+		t.Errorf("escape attempt should fail in the tool: %+v", d)
+	}
+
+	// ls: specific form (with path) and bare general form route to
+	// different rules, both listing real entries.
+	if d := r.Handle(ctx, "/ls data"); !d.Handled || d.RuleID != "list_dir" || d.Err != nil {
+		t.Fatalf("ls data: %+v", d)
+	} else if !strings.Contains(d.Text(), "reports") {
+		t.Errorf("ls data text = %s, want it to list reports", d.Text())
+	}
+	if d := r.Handle(ctx, "/list data"); !d.Handled || d.RuleID != "list_dir" {
+		t.Errorf("list data: %+v", d)
+	}
+	if d := r.Handle(ctx, "/ls"); !d.Handled || d.RuleID != "ls_root" || d.Err != nil {
+		t.Fatalf("bare ls: %+v", d)
+	} else if !strings.Contains(d.Text(), "data") {
+		t.Errorf("bare ls text = %s, want it to list data/", d.Text())
+	}
+
+	// job status: rule reaches the tool; an unknown id is the tool's error
+	// (Handled stays true — the rule matched).
+	for _, prompt := range []string{"/job j_deadbeef", "/jobs j_deadbeef"} {
+		if d := r.Handle(ctx, prompt); !d.Handled || d.RuleID != "job_status" || d.Err == nil {
+			t.Errorf("%s: %+v, want handled job_status error", prompt, d)
+		}
+	}
+}
+
+// TestSeededDownloadSplice pins the download rule's arg construction without
+// any network: captures must splice in the quoted "$N" form so even a URL
+// containing a double quote yields valid JSON args.
+func TestSeededDownloadSplice(t *testing.T) {
+	var download RuleDef
+	for _, d := range Seeded() {
+		if d.Name == "download" {
+			download = d
+		}
+	}
+	if download.Name == "" {
+		t.Fatal("download rule missing from Seeded()")
+	}
+	c, err := download.Compile()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	decode := func(prompt string) (url, path string) {
+		t.Helper()
+		m := c.Regexp().FindStringSubmatch(prompt)
+		if m == nil {
+			t.Fatalf("no match on %q", prompt)
+		}
+		args := spliceArgs(download.ArgsTemplate, m)
+		var got struct {
+			URL  string `json:"url"`
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal(args, &got); err != nil {
+			t.Fatalf("spliced args not valid JSON: %v (%s)", err, args)
+		}
+		return got.URL, got.Path
+	}
+
+	if u, p := decode("/download http://example.com/a.txt to data/a.txt"); u != "http://example.com/a.txt" || p != "data/a.txt" {
+		t.Errorf("with to: url=%q path=%q", u, p)
+	}
+	if u, p := decode("/download http://example.com/a.txt data/a.txt"); u != "http://example.com/a.txt" || p != "data/a.txt" {
+		t.Errorf("without to: url=%q path=%q", u, p)
+	}
+
+	// Hostile URL with a quote: the quoted splice must escape it, keeping
+	// the args document parseable.
+	m := c.Regexp().FindStringSubmatch(`/download http://example.com/x" data/a.txt`)
+	if m == nil {
+		t.Fatal("quoted URL did not match the pattern")
+	}
+	if args := spliceArgs(download.ArgsTemplate, m); !json.Valid(args) {
+		t.Errorf("args = %s, want valid JSON despite the quote", args)
+	}
+}

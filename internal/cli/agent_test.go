@@ -1,8 +1,8 @@
-// Tests for the aegis-agent command shell. run and repl take injected
+// Tests for the aegis agent subcommand. runAgent and repl take injected
 // stdout/stdin, so every test drives the real offline pipeline (temp store →
 // seeded router → system_command) the same way the binary does — only the
 // terminal is faked. AEGIS_LLM=off keeps the provider out entirely.
-package main
+package cli
 
 import (
 	"bytes"
@@ -20,12 +20,13 @@ import (
 	"aegisgo/internal/store"
 )
 
-// baseEnv applies the offline baseline every test boots under: LLM kill
-// switch on (no credentials anywhere), temp store, temp workspace, background
-// loops off, no external interfaces. config.Load treats "" exactly like
-// unset, so blanking plus t.Setenv's auto-restore keeps tests hermetic against
-// the developer's shell. Returns the store path for post-run inspection.
-func baseEnv(t *testing.T) string {
+// agentBaseEnv applies the offline baseline every agent test boots under:
+// LLM kill switch on (no credentials anywhere), temp store, temp workspace,
+// background loops off, no external interfaces. config.Load treats ""
+// exactly like unset, so blanking plus t.Setenv's auto-restore keeps tests
+// hermetic against the developer's shell. Returns the store path for
+// post-run inspection.
+func agentBaseEnv(t *testing.T) string {
 	t.Helper()
 	for _, k := range []string{
 		"AEGIS_MCP_SERVERS", "AEGIS_TELEGRAM_TOKEN", "AEGIS_GRPC_ADDR",
@@ -41,8 +42,8 @@ func baseEnv(t *testing.T) string {
 	return dbPath
 }
 
-// buildEngine boots the same app run() boots (quietly) and hands back the
-// engine for direct repl tests. The returned cleanup closes the store,
+// buildEngine boots the same app runAgent boots (quietly) and hands back
+// the engine for direct repl tests. The returned cleanup closes the store,
 // draining queued audit writes.
 func buildEngine(t *testing.T) (*engine.Engine, func()) {
 	t.Helper()
@@ -58,10 +59,10 @@ func buildEngine(t *testing.T) (*engine.Engine, func()) {
 // prints only the answer (no decision header — that is the REPL shape), and
 // leaves exactly one regex_router audit row keyed by the rule.
 func TestRunOneShotRouterHit(t *testing.T) {
-	dbPath := baseEnv(t)
+	dbPath := agentBaseEnv(t)
 
 	var buf bytes.Buffer
-	if err := run(context.Background(), "smart", []string{"/hostname"}, &buf); err != nil {
+	if err := runAgent(context.Background(), "smart", []string{"/hostname"}, &buf); err != nil {
 		t.Fatalf("run one-shot: %v", err)
 	}
 	out := buf.String()
@@ -79,8 +80,8 @@ func TestRunOneShotRouterHit(t *testing.T) {
 		t.Errorf("one-shot output %q must not carry the REPL decision header", out)
 	}
 
-	// run's deferred cleanup drains the async batcher, so the audit row is
-	// durable by the time run returns; verify from a fresh connection.
+	// runAgent's deferred cleanup drains the async batcher, so the audit row
+	// is durable by the time it returns; verify from a fresh connection.
 	st, err := store.Open(dbPath)
 	if err != nil {
 		t.Fatalf("reopening store: %v", err)
@@ -98,9 +99,9 @@ func TestRunOneShotRouterHit(t *testing.T) {
 }
 
 func TestRunBadTier(t *testing.T) {
-	baseEnv(t)
+	agentBaseEnv(t)
 	var buf bytes.Buffer
-	err := run(context.Background(), "bogus", []string{"/uptime"}, &buf)
+	err := runAgent(context.Background(), "bogus", []string{"/uptime"}, &buf)
 	if err == nil || !strings.Contains(err.Error(), `unknown tier "bogus"`) {
 		t.Fatalf("run with bogus tier error = %v, want unknown-tier failure", err)
 	}
@@ -109,7 +110,7 @@ func TestRunBadTier(t *testing.T) {
 // TestREPLExitAndQuit: both exit words leave the loop after the first prompt
 // without ever consulting the engine.
 func TestREPLExitAndQuit(t *testing.T) {
-	baseEnv(t)
+	agentBaseEnv(t)
 	eng, cleanup := buildEngine(t)
 	defer cleanup()
 
@@ -119,7 +120,7 @@ func TestREPLExitAndQuit(t *testing.T) {
 			t.Fatalf("repl on %q: %v", word, err)
 		}
 		out := buf.String()
-		if !strings.Contains(out, "aegis-agent interactive mode") {
+		if !strings.Contains(out, "aegis agent interactive mode") {
 			t.Errorf("repl on %q: output %q, want the banner", word, out)
 		}
 		if !strings.Contains(out, "\n> ") {
@@ -132,7 +133,7 @@ func TestREPLExitAndQuit(t *testing.T) {
 }
 
 func TestREPLEOF(t *testing.T) {
-	baseEnv(t)
+	agentBaseEnv(t)
 	eng, cleanup := buildEngine(t)
 	defer cleanup()
 
@@ -149,7 +150,7 @@ func TestREPLEOF(t *testing.T) {
 // TestREPLPromptThenBlank: a router command answers with its decision header
 // (source, rule, latency) and the answer; the following blank line exits.
 func TestREPLPromptThenBlank(t *testing.T) {
-	baseEnv(t)
+	agentBaseEnv(t)
 	eng, cleanup := buildEngine(t)
 	defer cleanup()
 
@@ -173,7 +174,7 @@ func TestREPLPromptThenBlank(t *testing.T) {
 // a pre-cancelled context still reads and runs the FIRST prompt (the ctx is
 // only checked after the run), then returns nil — no second prompt.
 func TestREPLCancelledContext(t *testing.T) {
-	baseEnv(t)
+	agentBaseEnv(t)
 	eng, cleanup := buildEngine(t)
 	defer cleanup()
 
