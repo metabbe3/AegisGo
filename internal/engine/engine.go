@@ -8,6 +8,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -142,7 +144,7 @@ func (e *Engine) Run(ctx context.Context, prompt string) Result {
 			return e.finishRouter(ctx, d, prompt, traceID, start)
 		}
 		llmTools := ToolNames(resp)
-		agreed := containsTool(llmTools, d.Tool)
+		agreed := slices.Contains(llmTools, d.Tool)
 		if err := e.Store.RecordShadow(ctx, store.ShadowEvent{
 			RuleName: d.RuleID, TraceID: traceID, Agreed: agreed, LLMTools: llmTools,
 		}); err != nil {
@@ -299,10 +301,9 @@ func (e *Engine) RunStreaming(ctx context.Context, prompt string, emit func(chun
 		return res
 	}
 
-	var toolNames []string
-	for n := range tools {
-		toolNames = append(toolNames, n)
-	}
+	// Sorted so corpus rows are deterministic despite the map's random
+	// iteration order (same tool set either way).
+	toolNames := slices.Sorted(maps.Keys(tools))
 	e.Store.RecordFallback(store.FallbackEvent{
 		TraceID:          traceID,
 		NormalizedPrompt: store.NormalizePrompt(prompt),
@@ -331,7 +332,7 @@ func (e *Engine) compareInline(ctx context.Context, d router.Decision, prompt st
 		return // comparison unavailable; the rule's answer stands
 	}
 	llmTools := ToolNames(resp)
-	agreed := containsTool(llmTools, d.Tool)
+	agreed := slices.Contains(llmTools, d.Tool)
 	if err := e.Store.RecordShadow(ctx, store.ShadowEvent{
 		RuleName: d.RuleID, TraceID: trace.From(ctx), Agreed: agreed, LLMTools: llmTools,
 	}); err != nil {
@@ -446,15 +447,6 @@ func tokenUsage(resp *agent.Response) (int, int) {
 		u.Add(m.Contents.Usage())
 	}
 	return int(u.InputTokenCount), int(u.OutputTokenCount)
-}
-
-func containsTool(names []string, want string) bool {
-	for _, n := range names {
-		if n == want {
-			return true
-		}
-	}
-	return false
 }
 
 func (e *Engine) audit(ctx context.Context, ev store.AuditEvent) {

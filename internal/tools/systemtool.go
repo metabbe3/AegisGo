@@ -106,15 +106,6 @@ func runSystem(ctx context.Context, in SystemInput) (SystemOutput, error) {
 	}, nil
 }
 
-// CatalogCommands describes the catalog for docs/tests.
-func CatalogCommands() map[string]string {
-	out := make(map[string]string, len(catalog))
-	for k, v := range catalog {
-		out[k] = v.description
-	}
-	return out
-}
-
 func catalogKeys() string {
 	keys := make([]string, 0, len(catalog))
 	for k := range catalog {

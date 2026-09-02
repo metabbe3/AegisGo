@@ -43,7 +43,7 @@ type Server struct {
 	pb.UnimplementedAgentServer
 	engine   Engine
 	answers  AnswerStore
-	readines Readiness
+	readiness Readiness
 	logger   *slog.Logger
 }
 
@@ -52,7 +52,7 @@ func New(e Engine, answers AnswerStore, read Readiness, logger *slog.Logger) *Se
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{engine: e, answers: answers, readines: read, logger: logger}
+	return &Server{engine: e, answers: answers, readiness: read, logger: logger}
 }
 
 // Register wires the Agent service, standard health, and reflection onto a
@@ -123,8 +123,8 @@ func (s *Server) GetAnswer(ctx context.Context, req *pb.GetAnswerRequest) (*pb.A
 }
 
 func (s *Server) Ready(ctx context.Context, _ *pb.ReadyRequest) (*pb.ReadyResponse, error) {
-	if s.readines != nil {
-		if err := s.readines.Ping(ctx); err != nil {
+	if s.readiness != nil {
+		if err := s.readiness.Ping(ctx); err != nil {
 			return &pb.ReadyResponse{Ready: false, Detail: err.Error()}, nil
 		}
 	}

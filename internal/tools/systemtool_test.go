@@ -46,24 +46,6 @@ func quoteJSON(s string) string {
 	return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
 }
 
-func TestCatalogCommands(t *testing.T) {
-	got := CatalogCommands()
-	want := []string{"disk", "hostname", "kernel", "memory", "uptime", "who"}
-	if len(got) != len(want) {
-		t.Fatalf("CatalogCommands() = %d keys (%v), want %d", len(got), got, len(want))
-	}
-	for _, k := range want {
-		desc, ok := got[k]
-		if !ok {
-			t.Errorf("catalog key %q missing", k)
-			continue
-		}
-		if strings.TrimSpace(desc) == "" {
-			t.Errorf("catalog key %q has empty description", k)
-		}
-	}
-}
-
 func TestRunSystemUnknownCommand(t *testing.T) {
 	tl, err := NewSystemCommand()
 	if err != nil {

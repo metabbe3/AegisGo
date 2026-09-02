@@ -47,23 +47,20 @@ func New(cfg config.Config, tier config.Tier, tools []tool.Tool, logger *slog.Lo
 	}
 
 	switch cfg.Provider {
-	case config.ProviderOpenAI:
-		oc := openaigo.NewClient(openaiopt.WithAPIKey(cfg.OpenAIKey))
+	case config.ProviderOpenAI, config.ProviderOpenAICompat:
+		// The two differ only in base URL and the provider label; Validate
+		// guarantees OPENAI_BASE_URL is set for compat.
+		opts := []openaiopt.RequestOption{openaiopt.WithAPIKey(cfg.OpenAIKey)}
+		name := ""
+		if cfg.Provider == config.ProviderOpenAICompat {
+			opts = append(opts, openaiopt.WithBaseURL(cfg.OpenAIBaseURL))
+			name = "openai-compatible"
+		}
+		oc := openaigo.NewClient(opts...)
 		return openaiprovider.NewChatCompletionsAgent(oc, openaiprovider.AgentConfig{
 			Model:        model,
 			Instructions: instructions,
-			Config:       base,
-		}), nil
-
-	case config.ProviderOpenAICompat:
-		oc := openaigo.NewClient(
-			openaiopt.WithAPIKey(cfg.OpenAIKey),
-			openaiopt.WithBaseURL(cfg.OpenAIBaseURL),
-		)
-		return openaiprovider.NewChatCompletionsAgent(oc, openaiprovider.AgentConfig{
-			Model:        model,
-			Instructions: instructions,
-			ProviderName: "openai-compatible",
+			ProviderName: name,
 			Config:       base,
 		}), nil
 

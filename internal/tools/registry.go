@@ -5,10 +5,6 @@
 // are validated per call in pathutil.go, a security boundary.
 package tools
 
-import (
-	"fmt"
-)
-
 // Options configures the built-in tool set.
 type Options struct {
 	// Workspace is the root file tools may read from (security boundary).
@@ -22,45 +18,47 @@ type Options struct {
 
 // Builtin returns the built-in tool set. Order is stable; tools are
 // appended, never replaced, so provider-side tool lists stay diffable.
+// Constructors already wrap their own errors ("building tool <name>: …"),
+// so failures pass through unwrapped.
 func Builtin(opts Options) ([]Tool, error) {
 	readCSV, err := NewReadCSV(opts.Workspace)
 	if err != nil {
-		return nil, fmt.Errorf("building read_csv: %w", err)
+		return nil, err
 	}
 	csvStats, err := NewCSVStats(opts.Workspace)
 	if err != nil {
-		return nil, fmt.Errorf("building csv_stats: %w", err)
+		return nil, err
 	}
 	readDoc, err := NewReadDoc(opts.Workspace)
 	if err != nil {
-		return nil, fmt.Errorf("building read_doc: %w", err)
+		return nil, err
 	}
 	sysCmd, err := NewSystemCommand()
 	if err != nil {
-		return nil, fmt.Errorf("building system_command: %w", err)
+		return nil, err
 	}
 	sqlQuery, err := NewSQLQuery(opts.Workspace, opts.SQL)
 	if err != nil {
-		return nil, fmt.Errorf("building sql_query: %w", err)
+		return nil, err
 	}
 	makeDir, err := NewMakeDir(opts.Workspace)
 	if err != nil {
-		return nil, fmt.Errorf("building make_dir: %w", err)
+		return nil, err
 	}
 	listDir, err := NewListDir(opts.Workspace)
 	if err != nil {
-		return nil, fmt.Errorf("building list_dir: %w", err)
+		return nil, err
 	}
 	// One job manager serves download + job_status so started jobs are
 	// pollable through the same process.
 	jobs := NewJobManager()
 	download, err := NewDownload(opts.Workspace, jobs, opts.Download)
 	if err != nil {
-		return nil, fmt.Errorf("building download: %w", err)
+		return nil, err
 	}
 	jobStatus, err := NewJobStatus(jobs)
 	if err != nil {
-		return nil, fmt.Errorf("building job_status: %w", err)
+		return nil, err
 	}
 	return []Tool{readCSV, csvStats, readDoc, sysCmd, sqlQuery,
 		makeDir, listDir, download, jobStatus}, nil

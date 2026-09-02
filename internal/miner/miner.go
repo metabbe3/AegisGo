@@ -32,6 +32,11 @@ var derivableTools = map[string]bool{
 // before a rule is proposed.
 const dominance = 0.85
 
+// minedArgsTemplate is the args template every mined rule uses: the only
+// derivable tools take exactly one workspace path, spliced from the single
+// pattern capture.
+const minedArgsTemplate = `{"path":"$1"}`
+
 // Proposal is one candidate rule the miner produced.
 type Proposal struct {
 	Name         string
@@ -112,12 +117,12 @@ func Mine(ctx context.Context, st *store.Store, opts Options, logger *slog.Logge
 		if err := st.Exec(ctx,
 			`INSERT INTO rules (name, pattern, tool, args_template, origin, enabled, created_ts, state)
 			 VALUES (?,?,?,?,?,1,?,?)`,
-			name, pattern, tool, `{"path":"$1"}`, "mined",
+			name, pattern, tool, minedArgsTemplate, "mined",
 			time.Now().UTC().Format(time.RFC3339Nano), router.RuleShadow); err != nil {
 			return nil, err
 		}
 		p := Proposal{Name: name, Pattern: pattern, Tool: tool,
-			ArgsTemplate: `{"path":"$1"}`, ClusterSize: c.count}
+			ArgsTemplate: minedArgsTemplate, ClusterSize: c.count}
 		proposals = append(proposals, p)
 		logger.Info("mined shadow rule", "name", name, "tool", tool,
 			"cluster", c.count, "pattern", pattern)

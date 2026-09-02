@@ -49,7 +49,7 @@ type Readiness interface {
 type Deps struct {
 	Engine   Engine
 	Answers  AnswerStore
-	Readines Readiness // optional; nil skips the deep check
+	Readiness Readiness // optional; nil skips the deep check
 	Stats    StatsSource
 	// Webhook, when non-nil, is mounted at POST /telegram/webhook (the
 	// handler itself is built by internal/telegram; the server stays
@@ -78,10 +78,10 @@ func Handler(d Deps) http.Handler {
 	})
 
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
-		if d.Readines != nil {
+		if d.Readiness != nil {
 			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 			defer cancel()
-			if err := d.Readines.Ping(ctx); err != nil {
+			if err := d.Readiness.Ping(ctx); err != nil {
 				writeError(w, http.StatusServiceUnavailable, "store unreachable: "+err.Error())
 				return
 			}

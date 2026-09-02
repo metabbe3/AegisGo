@@ -61,7 +61,7 @@ func serve(ctx context.Context, tierFlag string) error {
 	srv := &http.Server{
 		Addr: cfg.Addr,
 		Handler: server.Handler(server.Deps{
-			Engine: a.Engine, Answers: a.Store, Readines: a.Store, Stats: a.Store,
+			Engine: a.Engine, Answers: a.Store, Readiness: a.Store, Stats: a.Store,
 			Webhook: a.Webhook, // nil unless Telegram runs in webhook mode
 			Logger:  logger,
 		}),

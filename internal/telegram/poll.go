@@ -80,8 +80,12 @@ func (p *PollLoop) Run(ctx context.Context) {
 
 		// Advance the ack cursor only past fully processed work. Rows not
 		// yet done stay below the cursor and get refetched after a crash.
-		if err := p.advance(ctx, updates); err != nil {
-			p.logger.Error("telegram: advancing high water", "error", err)
+		// An empty batch can never ack anything, so skip the Pending scan
+		// idle polls would otherwise run every cycle.
+		if len(updates) > 0 {
+			if err := p.advance(ctx, updates); err != nil {
+				p.logger.Error("telegram: advancing high water", "error", err)
+			}
 		}
 	}
 }

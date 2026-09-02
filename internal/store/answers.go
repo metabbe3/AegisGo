@@ -46,7 +46,7 @@ func (s *Store) CompleteAnswer(ctx context.Context, traceID, status, output stri
 // GetAnswer returns the answer for a trace; expired rows read as absent and
 // are lazily deleted.
 func (s *Store) GetAnswer(ctx context.Context, traceID string) (Answer, bool, error) {
-	row := s.db.QueryRowContext(ctx,
+	row := s.QueryRow(ctx,
 		`SELECT status, output, expires_ts FROM answers WHERE trace_id=?`, traceID)
 	var status, output, expires string
 	if err := row.Scan(&status, &output, &expires); err != nil {
