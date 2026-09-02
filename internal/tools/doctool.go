@@ -62,14 +62,8 @@ func readDoc(workspace string, in DocReadInput) (DocReadOutput, error) {
 		return DocReadOutput{}, fmt.Errorf("read_doc does not support %q files (supported: txt, md, json, log, yaml, yml, xml, html, csv)", filepath.Ext(path))
 	}
 
-	limit := docDefaultBytes
-	if in.MaxBytes != nil && *in.MaxBytes > 0 {
-		limit = min(*in.MaxBytes, docHardCap)
-	}
-	offset := 0
-	if in.Offset != nil && *in.Offset > 0 {
-		offset = *in.Offset
-	}
+	limit := min(optPos(in.MaxBytes, docDefaultBytes), docHardCap)
+	offset := optPos(in.Offset, 0)
 
 	f, err := os.Open(path) //nolint:gosec // path already validated against workspace
 	if err != nil {

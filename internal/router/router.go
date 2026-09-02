@@ -89,13 +89,30 @@ type Router struct {
 // New builds a router from defs, verifying every rule names a registered
 // tool (a rule pointing at a missing tool is a routing bug: fail loudly).
 func New(toolset *tools.Registry, defs []RuleDef) (*Router, error) {
-	compiled := make([]CompiledRule, 0, len(defs))
+	// Duplicate names are only checked here, not in Swap: hot-reload defs
+	// come from the rules table, whose PRIMARY KEY on name already makes
+	// duplicates impossible.
 	seen := make(map[string]bool, len(defs))
 	for _, d := range defs {
 		if seen[d.Name] {
 			return nil, fmt.Errorf("duplicate rule %q", d.Name)
 		}
 		seen[d.Name] = true
+	}
+	compiled, err := compileAll(toolset, defs)
+	if err != nil {
+		return nil, err
+	}
+	r := &Router{toolset: toolset}
+	r.rules.Store(&compiled)
+	return r, nil
+}
+
+// compileAll validates every def against the toolset and compiles it —
+// the shared body of New and Swap.
+func compileAll(toolset *tools.Registry, defs []RuleDef) ([]CompiledRule, error) {
+	compiled := make([]CompiledRule, 0, len(defs))
+	for _, d := range defs {
 		if _, ok := toolset.Get(d.Tool); !ok {
 			return nil, fmt.Errorf("rule %q references unknown tool %q", d.Name, d.Tool)
 		}
@@ -105,23 +122,14 @@ func New(toolset *tools.Registry, defs []RuleDef) (*Router, error) {
 		}
 		compiled = append(compiled, c)
 	}
-	r := &Router{toolset: toolset}
-	r.rules.Store(&compiled)
-	return r, nil
+	return compiled, nil
 }
 
 // Swap atomically replaces the rule set (hot reload).
 func (r *Router) Swap(defs []RuleDef) error {
-	compiled := make([]CompiledRule, 0, len(defs))
-	for _, d := range defs {
-		if _, ok := r.toolset.Get(d.Tool); !ok {
-			return fmt.Errorf("rule %q references unknown tool %q", d.Name, d.Tool)
-		}
-		c, err := d.compile()
-		if err != nil {
-			return err
-		}
-		compiled = append(compiled, c)
+	compiled, err := compileAll(r.toolset, defs)
+	if err != nil {
+		return err
 	}
 	r.rules.Store(&compiled)
 	return nil

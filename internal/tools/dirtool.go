@@ -77,10 +77,7 @@ func NewListDir(workspace string) (Tool, error) {
 		Name:        "list_dir",
 		Description: "List a workspace directory: entry names, whether each is a directory, and file sizes. Use it to discover files before read_csv or read_doc.",
 	}, func(ctx context.Context, in DirListInput) (DirListOutput, error) {
-		limit := listDirDefault
-		if in.MaxEntries != nil && *in.MaxEntries >= 0 {
-			limit = min(*in.MaxEntries, listDirHardCap)
-		}
+		limit := min(optInt(in.MaxEntries, listDirDefault), listDirHardCap)
 		return listDir(workspace, in.Path, limit)
 	})
 }
