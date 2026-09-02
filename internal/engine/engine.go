@@ -114,10 +114,8 @@ func (e *Engine) Run(ctx context.Context, prompt string) Result {
 	// 2.5 Fast tier: on a miss, the classifier may resolve the prompt with
 	//     one cheap native-tool call (AEGIS_CLASSIFIER=on). Only reachable
 	//     when the LLM is on; declining falls through to the fallback below.
-	if !d.Handled && e.Classifier != nil {
-		if answer, tool, ok := e.Classifier.Classify(ctx, prompt); ok {
-			return e.finishClassifier(ctx, answer, tool, traceID, prompt, start)
-		}
+	if answer, tool, ok := e.tryClassifier(ctx, d, prompt); ok {
+		return e.finishClassifier(ctx, answer, tool, traceID, prompt, start)
 	}
 
 	// 3a. Shadow evaluation: the LLM runs; the rule is compared, not
@@ -160,19 +158,20 @@ func (e *Engine) RunStreaming(ctx context.Context, prompt string, emit func(chun
 	d := e.Router.Handle(ctx, prompt)
 
 	// Deterministic path: slice the router's answer. This covers sampled
-	// evaluations (compareInline runs the check alongside) and shadow rules
-	// without an LLM (nothing to compare — the rule answers, Run's degrade).
-	if d.Handled && (e.LLM == nil || !d.Evaluate || d.AnswerFromRule) {
+	// evaluations (compareShadow runs the check alongside — a no-op without
+	// an LLM) and shadow rules answering from the rule.
+	if d.Handled && (!d.Evaluate || d.AnswerFromRule) {
 		if d.Evaluate {
-			e.compareInline(ctx, d, prompt)
+			e.compareShadow(ctx, d, prompt)
 		}
 		res := e.finishRouter(ctx, d, prompt, traceID, start)
 		emitChunks(res.Answer, emit)
 		return res
 	}
 
-	// Shadow evaluation with an LLM: finishShadow consumes the ALREADY-
-	// ROUTED decision, so the tool executes exactly once (never re-route).
+	// Shadow evaluation: finishShadow consumes the ALREADY-ROUTED decision,
+	// so the tool executes exactly once (never re-route); without an LLM it
+	// degrades to the rule's answer inside.
 	if d.Handled {
 		res := e.finishShadow(ctx, d, prompt, traceID, start)
 		emitChunks(res.Answer, emit)
@@ -187,12 +186,10 @@ func (e *Engine) RunStreaming(ctx context.Context, prompt string, emit func(chun
 
 	// Fast tier (same placement as Run: miss + LLM on). The deterministic
 	// answer is chunked through the same SSE contract as everything else.
-	if e.Classifier != nil {
-		if answer, tool, ok := e.Classifier.Classify(ctx, prompt); ok {
-			res := e.finishClassifier(ctx, answer, tool, traceID, prompt, start)
-			emitChunks(res.Answer, emit)
-			return res
-		}
+	if answer, tool, ok := e.tryClassifier(ctx, d, prompt); ok {
+		res := e.finishClassifier(ctx, answer, tool, traceID, prompt, start)
+		emitChunks(res.Answer, emit)
+		return res
 	}
 
 	// LLM fallback: forward deltas as they stream off the provider.
@@ -244,20 +241,27 @@ func (e *Engine) RunStreaming(ctx context.Context, prompt string, emit func(chun
 		TraceID: traceID, LatencyMS: latency}
 }
 
-// compareInline runs the sampled-active-rule shadow comparison without
-// changing the answer path (the rule already answered).
-func (e *Engine) compareInline(ctx context.Context, d router.Decision, prompt string) {
-	if e.LLM == nil {
-		return
+// tryClassifier consults the fast tier on a router miss (AEGIS_CLASSIFIER=
+// on): one cheap native-tool call that either resolves the prompt (ok=true)
+// or declines. Routed decisions never consult it — shadow/sampled rules
+// need the LLM comparison, not a shortcut — and a nil classifier declines
+// without spending a call.
+func (e *Engine) tryClassifier(ctx context.Context, d router.Decision, prompt string) (string, string, bool) {
+	if d.Handled || e.Classifier == nil {
+		return "", "", false
 	}
-	e.compareShadow(ctx, d, prompt)
+	return e.Classifier.Classify(ctx, prompt)
 }
 
 // compareShadow runs the LLM for an evaluate-rule, records the tool-choice
 // agreement, and advances the rule's lifecycle. It never chooses the
 // answer; nil means the comparison was unavailable (the rule's answer
-// stands).
+// stands) — including when there is no LLM to compare against
+// (AEGIS_LLM=off), so callers need no guard of their own.
 func (e *Engine) compareShadow(ctx context.Context, d router.Decision, prompt string) *agent.Response {
+	if e.LLM == nil {
+		return nil // nothing to compare against; the rule's answer stands
+	}
 	resp, err := e.LLM.RunText(ctx, prompt).Collect()
 	if err != nil {
 		return nil // comparison unavailable; the rule's answer stands
@@ -376,8 +380,8 @@ func (e *Engine) finishLLMError(ctx context.Context, err error, traceID, prompt 
 // ALREADY-ROUTED decision d — the router has executed d's tool once, so
 // this must never re-route (double tool side effects). The LLM runs for
 // comparison; the rule answers when it is sampled (AnswerFromRule) or the
-// comparison is unavailable, else the LLM's answer wins while the rule
-// learns. Callers must guarantee e.LLM != nil.
+// comparison is unavailable (nil — e.g. AEGIS_LLM=off), else the LLM's
+// answer wins while the rule learns.
 func (e *Engine) finishShadow(ctx context.Context, d router.Decision, prompt, traceID string, start time.Time) Result {
 	resp := e.compareShadow(ctx, d, prompt)
 	if resp == nil || d.AnswerFromRule {

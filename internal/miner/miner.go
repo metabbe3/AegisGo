@@ -63,26 +63,18 @@ func Mine(ctx context.Context, st *store.Store, opts Options, logger *slog.Logge
 		opts.Threshold = 20
 	}
 
-	type cluster struct {
-		shape string
-		count int
-	}
-	eligible, err := store.QueryAll(ctx, st, store.FallbackShapeSQL+` HAVING c >= ? ORDER BY c DESC`,
-		func(r *sql.Rows) (cluster, error) {
-			var c cluster
-			return c, r.Scan(&c.shape, &c.count)
-		}, opts.Threshold)
+	eligible, err := st.FallbackShapes(ctx, opts.Threshold, 0)
 	if err != nil {
 		return nil, err
 	}
 
 	var proposals []Proposal
 	for _, c := range eligible {
-		tool, ok := dominantTool(ctx, st, c.shape, c.count)
+		tool, ok := dominantTool(ctx, st, c.Shape, c.Count)
 		if !ok {
 			continue
 		}
-		pattern, ok := synthesizePattern(c.shape)
+		pattern, ok := synthesizePattern(c.Shape)
 		if !ok {
 			continue
 		}
@@ -110,10 +102,10 @@ func Mine(ctx context.Context, st *store.Store, opts Options, logger *slog.Logge
 			return nil, err
 		}
 		p := Proposal{Name: name, Pattern: pattern, Tool: tool,
-			ArgsTemplate: minedArgsTemplate, ClusterSize: c.count}
+			ArgsTemplate: minedArgsTemplate, ClusterSize: c.Count}
 		proposals = append(proposals, p)
 		logger.Info("mined shadow rule", "name", name, "tool", tool,
-			"cluster", c.count, "pattern", pattern)
+			"cluster", c.Count, "pattern", pattern)
 	}
 	return proposals, nil
 }

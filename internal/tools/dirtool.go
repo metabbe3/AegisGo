@@ -93,18 +93,14 @@ func listDir(workspace, name string, limit int) (DirListOutput, error) {
 	}
 	// os.ReadDir sorts by name, so output is deterministic. Entries beyond
 	// the limit are counted in Total, not stored.
-	out := DirListOutput{Path: name, Entries: make([]DirEntryInfo, 0, min(len(ents), limit))}
-	for _, e := range ents {
-		out.Total++
-		if len(out.Entries) >= limit {
-			continue
-		}
+	out := DirListOutput{Path: name, Total: len(ents), Truncated: len(ents) > limit,
+		Entries: make([]DirEntryInfo, 0, min(len(ents), limit))}
+	for _, e := range ents[:min(len(ents), limit)] {
 		info := DirEntryInfo{Name: e.Name(), IsDir: e.IsDir()}
 		if fi, infoErr := e.Info(); infoErr == nil {
 			info.SizeBytes = fi.Size()
 		}
 		out.Entries = append(out.Entries, info)
 	}
-	out.Truncated = out.Total > len(out.Entries)
 	return out, nil
 }

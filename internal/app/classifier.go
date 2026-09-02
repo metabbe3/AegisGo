@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 
 	"aegisgo/internal/engine"
@@ -74,7 +73,9 @@ func (c *appClassifier) Classify(ctx context.Context, prompt string) (string, st
 	}
 	b, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {
-		b = []byte(fmt.Sprint(out))
+		// Unreachable for real (tool outputs are JSON values), but a
+		// non-marshalable one declines like every other failure mode.
+		return "", "", false
 	}
 	return string(b), tool, true
 }

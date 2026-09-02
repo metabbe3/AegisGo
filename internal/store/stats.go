@@ -24,10 +24,11 @@ type ShapeCount struct {
 	Count int    `json:"count"`
 }
 
-// FallbackShapeSQL is the fallback-corpus grouping stats and the miner
+// fallbackShapeSQL is the fallback-corpus grouping stats and the miner
 // share: stats previews the top shapes, the miner clusters them for rule
-// proposals — same GROUP BY, different trailing filter.
-const FallbackShapeSQL = `SELECT normalized_prompt, COUNT(*) c FROM fallback_events GROUP BY normalized_prompt`
+// proposals — same GROUP BY, different trailing filter (FallbackShapes
+// owns the assembly).
+const fallbackShapeSQL = `SELECT normalized_prompt, COUNT(*) c FROM fallback_events GROUP BY normalized_prompt`
 
 // groupCount is one GROUP BY row: a label and its count.
 type groupCount struct {
@@ -35,14 +36,47 @@ type groupCount struct {
 	n   int
 }
 
+// FallbackShapes lists fallback-corpus shapes with their counts, largest
+// first, keeping only shapes seen at least minCount times and at most limit
+// rows (0 = no limit) — the one query behind the stats preview and the
+// miner's clustering. A GROUP BY count is never below 1, so minCount=1 is
+// the unfiltered case.
+func (s *Store) FallbackShapes(ctx context.Context, minCount, limit int) ([]ShapeCount, error) {
+	q := fallbackShapeSQL + ` HAVING c >= ? ORDER BY c DESC`
+	args := []any{minCount}
+	if limit > 0 {
+		q += ` LIMIT ?`
+		args = append(args, limit)
+	}
+	return QueryAll(ctx, s, q, func(r *sql.Rows) (ShapeCount, error) {
+		var v ShapeCount
+		return v, r.Scan(&v.Shape, &v.Count)
+	}, args...)
+}
+
+// counts runs a two-column GROUP BY (label, COUNT(*)) into a map — the
+// shared shape of the by-interface and rules-by-state aggregations.
+func (s *Store) counts(ctx context.Context, query string, args ...any) (map[string]int, error) {
+	rows, err := QueryAll(ctx, s, query, func(r *sql.Rows) (groupCount, error) {
+		var v groupCount
+		return v, r.Scan(&v.key, &v.n)
+	}, args...)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]int, len(rows))
+	for _, v := range rows {
+		out[v.key] = v.n
+	}
+	return out, nil
+}
+
 // Stats computes the snapshot with canned SELECTs over the audit trail,
 // rules table, and fallback corpus.
 func (s *Store) Stats(ctx context.Context) (*StatsSnapshot, error) {
 	out := &StatsSnapshot{
 		BySource:     map[string]int{},
-		ByInterface:  map[string]int{},
 		AvgLatencyMS: map[string]int64{},
-		RulesByState: map[string]int{},
 	}
 
 	if err := s.QueryRow(ctx, `SELECT COUNT(*) FROM audit_events`).Scan(&out.TotalRuns); err != nil {
@@ -71,37 +105,16 @@ func (s *Store) Stats(ctx context.Context) (*StatsSnapshot, error) {
 		out.DeflectionRate = float64(out.BySource[SourceRouter]) / float64(out.TotalRuns)
 	}
 
-	ifaceRows, err := QueryAll(ctx, s,
-		`SELECT interface, COUNT(*) FROM audit_events GROUP BY interface`,
-		func(r *sql.Rows) (groupCount, error) {
-			var v groupCount
-			return v, r.Scan(&v.key, &v.n)
-		})
+	out.ByInterface, err = s.counts(ctx, `SELECT interface, COUNT(*) FROM audit_events GROUP BY interface`)
 	if err != nil {
 		return nil, err
 	}
-	for _, v := range ifaceRows {
-		out.ByInterface[v.key] = v.n
-	}
-
-	stateRows, err := QueryAll(ctx, s,
-		`SELECT state, COUNT(*) FROM rules GROUP BY state`,
-		func(r *sql.Rows) (groupCount, error) {
-			var v groupCount
-			return v, r.Scan(&v.key, &v.n)
-		})
+	out.RulesByState, err = s.counts(ctx, `SELECT state, COUNT(*) FROM rules GROUP BY state`)
 	if err != nil {
 		return nil, err
 	}
-	for _, v := range stateRows {
-		out.RulesByState[v.key] = v.n
-	}
 
-	out.TopFallbacks, err = QueryAll(ctx, s, FallbackShapeSQL+` ORDER BY c DESC LIMIT 10`,
-		func(r *sql.Rows) (ShapeCount, error) {
-			var v ShapeCount
-			return v, r.Scan(&v.Shape, &v.Count)
-		})
+	out.TopFallbacks, err = s.FallbackShapes(ctx, 1, 10)
 	if err != nil {
 		return nil, err
 	}

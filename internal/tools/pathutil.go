@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -73,7 +74,8 @@ func resolveNewPath(workspace, name string) (string, error) {
 
 	// Walk up to the deepest existing ancestor, collecting the not-yet-real
 	// suffix. ENOTDIR (traversing through a regular file) is not IsNotExist
-	// and surfaces as a resolve error, mirroring resolvePath.
+	// and surfaces as a resolve error, mirroring resolvePath. Bases are
+	// appended in walk order (childmost last) and reversed once below.
 	ancestor := candidate
 	var suffix []string
 	for {
@@ -90,7 +92,7 @@ func resolveNewPath(workspace, name string) (string, error) {
 			// containment check below can never pass for this path.
 			return "", fmt.Errorf("path %q escapes the workspace", name)
 		}
-		suffix = append([]string{filepath.Base(ancestor)}, suffix...)
+		suffix = append(suffix, filepath.Base(ancestor))
 		ancestor = parent
 	}
 
@@ -104,6 +106,7 @@ func resolveNewPath(workspace, name string) (string, error) {
 	if len(suffix) == 0 {
 		return realAncestor, nil
 	}
+	slices.Reverse(suffix) // ancestor-first, matching filepath.Join order
 	return filepath.Join(append([]string{realAncestor}, suffix...)...), nil
 }
 

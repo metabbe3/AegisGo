@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"aegisgo/internal/logx"
+	"aegisgo/internal/task"
 )
 
 // Poll defaults.
@@ -41,14 +42,7 @@ func NewPollLoop(c Client, inbox *Inbox, pool *WorkerPool, logger *slog.Logger) 
 // Wait blocks until Run has returned or d elapses; it reports whether the
 // transport goroutine joined. Call after cancelling Run's context.
 func (p *PollLoop) Wait(d time.Duration) bool {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-p.done:
-		return true
-	case <-t.C:
-		return false
-	}
+	return task.WaitFor(p.done, d)
 }
 
 // Run blocks until ctx is cancelled. It is the transport's only goroutine;

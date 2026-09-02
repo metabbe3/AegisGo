@@ -11,13 +11,22 @@ decision_source. File tools (make_dir, list_dir, background download +
 job_status) workspace-sandboxed and e2e-proven.
 
 Repo-wide simplify/refactor pass COMPLETE on branch
-`refactor/simplify-pass` (commits 52659e6..0ef4b98, one per cluster).
-Three new stdlib-only helper packages — internal/logx (slog build +
-nil-guards), internal/loop (Periodic), internal/task (Group) — plus
-store.QueryAll[T], engine finish* tails, tools optInt/optPos/
-openCSVReader/checkPathName, router compileAll. Net ≈ −300 non-test
-lines, +~400 test lines, zero new dependencies. All gates green:
-make vet/test/check/cover (93.8%).
+`refactor/simplify-pass` (commits 52659e6..0ef4b98, one per cluster) —
+including the closeout /simplify application (4 reviewers → deduped
+findings applied): task.WaitFor bounded-join idiom (Group.Wait and
+telegram PollLoop.Wait share it), store.FallbackShapes (typed method
+owning the stats/miner GROUP BY), stats counts() helper, engine
+tryClassifier + compareShadow owning its nil-LLM guard (compareInline
+deleted), app.Build fail() boot-ladder closure, download .part cleanup
+collapsed into one renamed-keyed defer, listDir slice+min, miner-grade
+suffix reverse in resolveNewPath, loop.Periodic stop now JOINS an
+in-flight tick (bounded 2s) so a fast tick cannot write into a store the
+caller just closed. Three new stdlib-only helper packages — internal/logx
+(slog build + nil-guards), internal/loop (Periodic), internal/task
+(Group) — plus store.QueryAll[T], engine finish* tails, tools
+optInt/optPos/openCSVReader/checkPathName, router compileAll. Net ≈
+−300 non-test lines, +~400 test lines, zero new dependencies. All gates
+green: make vet/test/check/cover (94.1%).
 
 ## Behavior changes in the pass (all deliberate, each a fix)
 
@@ -26,7 +35,7 @@ make vet/test/check/cover (93.8%).
 | BC1 | `?stream=1` shadow rules execute the tool ONCE, not twice | TestRunStreamingShadowExecutesToolOnce |
 | BC2 | AEGIS_LOG_LEVEL is live; serve logs JSON on stdout incl. slog.Default lines | logx tests + cli serve wiring |
 | BC3 | store stats/miner loops surface rows.Err() via store.QueryAll | store tests |
-| BC4 | rules hot-reload stop() is idempotent (was: close-of-closed panic) | TestStartHotReloadStopIdempotent |
+| BC4 | rules hot-reload stop() is idempotent (was: close-of-closed panic); stop also joins an in-flight tick (≤2s) | TestStartHotReloadStopIdempotent, TestPeriodicStopJoinsInFlightTick |
 | BC5 | serve shutdown JOINS async runs (tasks.Wait 10s) — was a 500ms sleep | task tests + TestServeGracefulShutdown |
 | BC6 | expired answers swept every 5min, not only lazily on read | TestDeleteExpiredAnswers |
 | BC7 | idle telegram worker cadence 1s → 5s (Wake covers immediacy) | — (constant) |
@@ -38,8 +47,8 @@ Also: REST/gRPC async runs now carry the sync path's 5-minute bound
 
 ## In flight
 
-- Nothing open. Closeout simplify review ran over the full branch diff;
-  only doc updates may remain uncommitted.
+- Nothing open. Closeout simplify review ran over the full branch diff,
+  findings applied and committed.
 
 ## Next steps (candidates, in order)
 

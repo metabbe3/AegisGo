@@ -39,6 +39,15 @@ func (g *Group) Wait(d time.Duration) bool {
 		g.wg.Wait()
 		close(done)
 	}()
+	return WaitFor(done, d)
+}
+
+// WaitFor blocks until done is closed or d elapses and reports whether the
+// join happened — the bounded-join idiom behind Group.Wait, shared by any
+// component that owns its own goroutine-exit channel (e.g. telegram's
+// PollLoop). One timer, no helper goroutine, so an abandoned wait leaks
+// nothing.
+func WaitFor(done <-chan struct{}, d time.Duration) bool {
 	t := time.NewTimer(d)
 	defer t.Stop()
 	select {

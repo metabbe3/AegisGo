@@ -86,6 +86,16 @@ func Build(ctx context.Context, cfg config.Config, tier config.Tier,
 	stopReload := router.StartHotReload(ctx, rt, st,
 		time.Duration(cfg.RulesReloadSecs)*time.Second, logger)
 
+	// fail tears down every boot resource acquired so far. The arms above
+	// (before stopReload existed) keep their own narrower cleanup; the ones
+	// below own exactly these three resources.
+	fail := func(err error) (*App, func(), error) {
+		stopReload()
+		releaseMCP()
+		st.Close()
+		return nil, nil, err
+	}
+
 	// Self-mining: fallback corpus → shadow rules → promotion via the
 	// engine's tool-choice comparison. Promotion bar from config.
 	engine.PromoteAfter = max(1, cfg.MinerPromoteAfter)
@@ -100,17 +110,11 @@ func Build(ctx context.Context, cfg config.Config, tier config.Tier,
 	var classifierModel string
 	if !cfg.LLMDisabled() {
 		if err := cfg.Validate(); err != nil {
-			stopReload()
-			releaseMCP()
-			st.Close()
-			return nil, nil, err
+			return fail(err)
 		}
 		a, err := provider.New(cfg, tier, append(reg.FuncTools(), mcpTools...), logger)
 		if err != nil {
-			stopReload()
-			releaseMCP()
-			st.Close()
-			return nil, nil, err
+			return fail(err)
 		}
 		llm = a
 		model = cfg.ModelFor(tier)
@@ -129,10 +133,7 @@ func Build(ctx context.Context, cfg config.Config, tier config.Tier,
 			} else {
 				fa, err := provider.New(cfg, config.TierFast, nil, logger)
 				if err != nil {
-					stopReload()
-					releaseMCP()
-					st.Close()
-					return nil, nil, fmt.Errorf("building classifier: %w", err)
+					return fail(fmt.Errorf("building classifier: %w", err))
 				}
 				classifier = &appClassifier{llm: fa, reg: reg, prompt: newClassifierPrompt(reg)}
 				classifierModel = fast

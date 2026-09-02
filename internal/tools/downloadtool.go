@@ -127,67 +127,72 @@ func startDownload(ctx context.Context, workspace string, mgr *JobManager,
 		return DownloadJobOutput{}, fmt.Errorf("download target %q is a directory", in.Path)
 	}
 
-	dlURL, dlPath := in.URL, in.Path
 	jobID := mgr.Start(ctx, time.Duration(opts.TimeoutSecs)*time.Second, "download",
-		map[string]string{"url": dlURL, "path": dlPath},
+		map[string]string{"url": in.URL, "path": in.Path},
 		func(ctx context.Context) (any, error) {
-			return runDownload(ctx, client, dlURL, dlPath, target, opts.MaxBytes)
+			return runDownload(ctx, client, in, target, opts.MaxBytes)
 		})
-	return DownloadJobOutput{JobID: jobID, Status: JobRunning, URL: dlURL, Path: dlPath}, nil
+	return DownloadJobOutput{JobID: jobID, Status: JobRunning, URL: in.URL, Path: in.Path}, nil
 }
 
 // runDownload performs the fetch. It streams into a temp .part file next to
 // the target and renames on success, so a failure or oversize abort never
 // leaves a partial file at the final path.
-func runDownload(ctx context.Context, client *http.Client, dlURL, dlPath, target string, maxBytes int64) (any, error) {
+func runDownload(ctx context.Context, client *http.Client, in DownloadInput, target string, maxBytes int64) (any, error) {
 	// The parent of a validated in-workspace path is an in-workspace
 	// ancestor; creating it can never escape.
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		return nil, fmt.Errorf("creating parent of %q: %w", dlPath, err)
+		return nil, fmt.Errorf("creating parent of %q: %w", in.Path, err)
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(target), ".aegis-dl-*.part")
 	if err != nil {
-		return nil, fmt.Errorf("staging file for %q: %w", dlPath, err)
+		return nil, fmt.Errorf("staging file for %q: %w", in.Path, err)
 	}
 	part := tmp.Name()
 	fail := func(err error) (any, error) {
 		tmp.Close()
-		os.Remove(part)
 		return nil, err
 	}
+	// Any exit before the rename removes the staged .part file — the rename
+	// is the point of no return. (After a successful rename the file has a
+	// new name; Remove would be a no-op at best.)
+	renamed := false
+	defer func() {
+		if !renamed {
+			os.Remove(part)
+		}
+	}()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, dlURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, in.URL, nil)
 	if err != nil {
-		return fail(fmt.Errorf("building request for %q: %w", dlURL, err))
+		return fail(fmt.Errorf("building request for %q: %w", in.URL, err))
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fail(fmt.Errorf("fetching %q: %w", dlURL, err))
+		return fail(fmt.Errorf("fetching %q: %w", in.URL, err))
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return fail(fmt.Errorf("fetching %q: status %s", dlURL, resp.Status))
+		return fail(fmt.Errorf("fetching %q: status %s", in.URL, resp.Status))
 	}
 
 	// Read maxBytes+1 so oversize is detected (and failed) rather than
 	// silently truncated at the cap.
 	n, err := io.Copy(tmp, io.LimitReader(resp.Body, maxBytes+1))
 	if err != nil {
-		return fail(fmt.Errorf("downloading %q: %w", dlURL, err))
+		return fail(fmt.Errorf("downloading %q: %w", in.URL, err))
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(part)
-		return nil, fmt.Errorf("writing %q: %w", dlPath, err)
+		return nil, fmt.Errorf("writing %q: %w", in.Path, err)
 	}
 	if n > maxBytes {
-		os.Remove(part)
-		return nil, fmt.Errorf("download %q exceeds the %d-byte cap (AEGIS_DOWNLOAD_MAX_BYTES)", dlURL, maxBytes)
+		return nil, fmt.Errorf("download %q exceeds the %d-byte cap (AEGIS_DOWNLOAD_MAX_BYTES)", in.URL, maxBytes)
 	}
 	if err := os.Rename(part, target); err != nil {
-		os.Remove(part)
-		return nil, fmt.Errorf("finalizing %q: %w", dlPath, err)
+		return nil, fmt.Errorf("finalizing %q: %w", in.Path, err)
 	}
-	return DownloadResult{Bytes: n, URL: dlURL, Path: dlPath}, nil
+	renamed = true
+	return DownloadResult{Bytes: n, URL: in.URL, Path: in.Path}, nil
 }
 
 // checkDownloadURL enforces the download tool's SSRF posture: http(s) only,

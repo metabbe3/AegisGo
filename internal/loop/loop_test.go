@@ -104,3 +104,46 @@ func TestPeriodicDisabled(t *testing.T) {
 		t.Errorf("fn fired %d times with interval 0", n.Load())
 	}
 }
+
+// TestPeriodicStopJoinsInFlightTick pins the stop contract: a fast
+// in-flight tick completes BEFORE stop returns — stop must not race the
+// caller's teardown (writing into a store the caller is about to close).
+func TestPeriodicStopJoinsInFlightTick(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var completed atomic.Bool
+	stop := Periodic(context.Background(), 2*time.Millisecond, time.Minute,
+		func(context.Context) {
+			select {
+			case <-entered:
+			default:
+				close(entered)
+			}
+			<-release
+			completed.Store(true)
+		})
+
+	<-entered // a tick is now in flight, blocked in fn
+	stopFinished := make(chan struct{})
+	go func() {
+		stop()
+		close(stopFinished)
+	}()
+
+	// While the tick is blocked, stop must hold the join.
+	select {
+	case <-stopFinished:
+		t.Fatal("stop returned while a tick was still in flight")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(release)
+	select {
+	case <-stopFinished:
+	case <-time.After(2 * time.Second):
+		t.Fatal("stop did not return after the in-flight tick finished")
+	}
+	if !completed.Load() {
+		t.Fatal("in-flight tick did not complete")
+	}
+}

@@ -38,25 +38,29 @@ func (s *Store) RecordShadow(ctx context.Context, ev ShadowEvent) error {
 }
 
 // ShadowStreak counts consecutive agreements for a rule, most recent first,
-// stopping at the first disagreement. The promotion signal.
+// stopping at the first disagreement. The promotion signal. Streams instead
+// of QueryAll on purpose: this runs per shadow comparison (a request path)
+// and the common case meets its disagreement in the first few rows —
+// materializing all 100 would be pure waste.
 func (s *Store) ShadowStreak(ctx context.Context, rule string) (int, error) {
-	agreed, err := QueryAll(ctx, s,
-		`SELECT agreed FROM shadow_events WHERE rule_name=? ORDER BY id DESC LIMIT 100`,
-		func(r *sql.Rows) (int, error) {
-			var a int
-			return a, r.Scan(&a)
-		}, rule)
+	rows, err := s.Query(ctx,
+		`SELECT agreed FROM shadow_events WHERE rule_name=? ORDER BY id DESC LIMIT 100`, rule)
 	if err != nil {
 		return 0, err
 	}
+	defer rows.Close()
 	streak := 0
-	for _, a := range agreed {
+	for rows.Next() {
+		var a int
+		if err := rows.Scan(&a); err != nil {
+			return 0, err
+		}
 		if a == 0 {
 			break
 		}
 		streak++
 	}
-	return streak, nil
+	return streak, rows.Err()
 }
 
 // SetRuleState transitions a rule's lifecycle state and enabled flag.

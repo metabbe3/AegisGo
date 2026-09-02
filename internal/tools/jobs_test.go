@@ -26,15 +26,26 @@ func waitForJob(t *testing.T, mgr *JobManager, id string) Job {
 
 func TestJobManagerLifecycle(t *testing.T) {
 	mgr := NewJobManager()
+	// The job blocks until released so its "running" snapshot is observed,
+	// not raced for: an instantly-returning fn can flip the job to done
+	// before Get runs (this test used to flake under coverage that way).
+	running := make(chan struct{})
+	release := make(chan struct{})
 	id := mgr.Start(context.Background(), time.Second, "test", map[string]string{"k": "v"},
-		func(ctx context.Context) (any, error) { return "all good", nil })
+		func(ctx context.Context) (any, error) {
+			close(running)
+			<-release
+			return "all good", nil
+		})
 	if !strings.HasPrefix(id, "j_") {
 		t.Errorf("job id = %q, want j_ prefix", id)
 	}
 
+	<-running // fn entered: the job stays running until release
 	if j, ok := mgr.Get(id); !ok || j.Status != JobRunning || j.Kind != "test" || j.Meta["k"] != "v" {
 		t.Errorf("running job = %+v (ok=%v)", j, ok)
 	}
+	close(release)
 	done := waitForJob(t, mgr, id)
 	if done.Status != JobDone || done.Result != "all good" || done.Error != "" {
 		t.Errorf("finished job = %+v, want done with result", done)
