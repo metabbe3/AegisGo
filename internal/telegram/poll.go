@@ -26,17 +26,35 @@ type PollLoop struct {
 	inbox  *Inbox
 	pool   *WorkerPool
 	logger *slog.Logger
+	// done is closed when Run returns, so shutdown can join the transport
+	// goroutine instead of leaking it past the store close.
+	done chan struct{}
 }
 
 // NewPollLoop builds the poll transport.
 func NewPollLoop(c Client, inbox *Inbox, pool *WorkerPool, logger *slog.Logger) *PollLoop {
 	logger = logx.Or(logger)
-	return &PollLoop{client: c, inbox: inbox, pool: pool, logger: logger}
+	return &PollLoop{client: c, inbox: inbox, pool: pool, logger: logger,
+		done: make(chan struct{})}
+}
+
+// Wait blocks until Run has returned or d elapses; it reports whether the
+// transport goroutine joined. Call after cancelling Run's context.
+func (p *PollLoop) Wait(d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-p.done:
+		return true
+	case <-t.C:
+		return false
+	}
 }
 
 // Run blocks until ctx is cancelled. It is the transport's only goroutine;
 // workers live in the shared pool.
 func (p *PollLoop) Run(ctx context.Context) {
+	defer close(p.done)
 	backoff := pollMinBack
 	p.logger.Info("telegram: long-poll transport started (no public ingress required)")
 	for {

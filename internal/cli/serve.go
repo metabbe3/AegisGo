@@ -19,6 +19,7 @@ import (
 	"aegisgo/internal/config"
 	"aegisgo/internal/grpcapi"
 	"aegisgo/internal/logx"
+	"aegisgo/internal/loop"
 	"aegisgo/internal/server"
 	"aegisgo/internal/store"
 	"aegisgo/internal/task"
@@ -64,6 +65,14 @@ func serve(ctx context.Context, tierFlag string) error {
 		return err
 	}
 	defer cleanup()
+
+	// Sweep expired async answers every 5 minutes: lazy delete-on-read only
+	// fires on traffic, so abandoned traces would otherwise sit forever.
+	defer loop.Periodic(ctx, 5*time.Minute, time.Minute, func(sctx context.Context) {
+		if err := a.Store.DeleteExpiredAnswers(sctx); err != nil {
+			logger.Warn("sweeping expired answers", "error", err)
+		}
+	})()
 
 	// One task group for every detached run (REST + gRPC async answers) so
 	// shutdown can join them for real instead of guessing with a sleep.

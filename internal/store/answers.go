@@ -55,6 +55,15 @@ func (s *Store) CompleteAnswer(ctx context.Context, traceID, status, output stri
 	)
 }
 
+// DeleteExpiredAnswers removes answer rows past their TTL. GetAnswer
+// already deletes lazily on read; this background sweep (serve wires it to
+// a 5-minute loop) clears rows nobody ever polls, so the table stays
+// bounded without traffic.
+func (s *Store) DeleteExpiredAnswers(ctx context.Context) error {
+	return s.execSync(ctx,
+		`DELETE FROM answers WHERE expires_ts < ?`, time.Now().UTC().Format(time.RFC3339Nano))
+}
+
 // GetAnswer returns the answer for a trace; expired rows read as absent and
 // are lazily deleted.
 func (s *Store) GetAnswer(ctx context.Context, traceID string) (Answer, bool, error) {

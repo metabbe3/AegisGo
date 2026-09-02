@@ -225,13 +225,17 @@ func startTelegram(ctx context.Context, cfg config.Config, eng *engine.Engine,
 		}, logger)
 
 	workers := max(1, cfg.TelegramWorkers)
-	pool := telegram.NewWorkerPool(inbox, workers, time.Second, dispatcher.Process, logger)
+	// 5s idle cadence: Wake() fires on every enqueue, so the interval only
+	// governs how often an idle worker re-checks the inbox (crash recovery
+	// of un-woken rows) — 1s was pure database churn.
+	pool := telegram.NewWorkerPool(inbox, workers, 5*time.Second, dispatcher.Process, logger)
 
 	// The transport outlives the boot context (it serves until shutdown).
 	tgCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	pool.Start(tgCtx)
 
 	var webhook http.Handler
+	var poller *telegram.PollLoop
 	if cfg.TelegramUseWebhook() {
 		if cfg.TelegramWebhookURL == "" {
 			cancel()
@@ -250,14 +254,19 @@ func startTelegram(ctx context.Context, cfg config.Config, eng *engine.Engine,
 		webhook = telegram.NewWebhookHandler(secret, inbox, pool, logger)
 		logger.Info("telegram: webhook transport active", "bot", botName, "url", publicURL)
 	} else {
-		loop := telegram.NewPollLoop(client, inbox, pool, logger)
-		go loop.Run(tgCtx)
+		poller = telegram.NewPollLoop(client, inbox, pool, logger)
+		go poller.Run(tgCtx)
 		logger.Info("telegram: long-poll transport active", "bot", botName)
 	}
 
 	stop := func() {
 		pool.Stop()
 		cancel()
+		// Join the poll goroutine (bounded): an in-flight getUpdates must
+		// not outlive the store close it may still write into.
+		if poller != nil && !poller.Wait(10*time.Second) {
+			logger.Warn("telegram: long-poll transport still running after 10s; proceeding")
+		}
 	}
 	return webhook, stop, nil
 }
