@@ -8,13 +8,38 @@ Single `aegis` binary shipped (agent · serve · ctl · version; logic in
 internal/cli). Hybrid pipeline live: regex_router → optional
 llm_classifier (AEGIS_CLASSIFIER) → llm, every run audited with a
 decision_source. File tools (make_dir, list_dir, background download +
-job_status) workspace-sandboxed and e2e-proven. All gates green:
-make vet/test/check/cover (94%) and 13/13 e2e stages including the real
-Ollama LLM + MCP-echo + classifier stage.
+job_status) workspace-sandboxed and e2e-proven.
+
+Repo-wide simplify/refactor pass COMPLETE on branch
+`refactor/simplify-pass` (commits 52659e6..0ef4b98, one per cluster).
+Three new stdlib-only helper packages — internal/logx (slog build +
+nil-guards), internal/loop (Periodic), internal/task (Group) — plus
+store.QueryAll[T], engine finish* tails, tools optInt/optPos/
+openCSVReader/checkPathName, router compileAll. Net ≈ −300 non-test
+lines, +~400 test lines, zero new dependencies. All gates green:
+make vet/test/check/cover (93.8%).
+
+## Behavior changes in the pass (all deliberate, each a fix)
+
+| # | Change | Pinned by |
+|---|--------|-----------|
+| BC1 | `?stream=1` shadow rules execute the tool ONCE, not twice | TestRunStreamingShadowExecutesToolOnce |
+| BC2 | AEGIS_LOG_LEVEL is live; serve logs JSON on stdout incl. slog.Default lines | logx tests + cli serve wiring |
+| BC3 | store stats/miner loops surface rows.Err() via store.QueryAll | store tests |
+| BC4 | rules hot-reload stop() is idempotent (was: close-of-closed panic) | TestStartHotReloadStopIdempotent |
+| BC5 | serve shutdown JOINS async runs (tasks.Wait 10s) — was a 500ms sleep | task tests + TestServeGracefulShutdown |
+| BC6 | expired answers swept every 5min, not only lazily on read | TestDeleteExpiredAnswers |
+| BC7 | idle telegram worker cadence 1s → 5s (Wake covers immediacy) | — (constant) |
+| BC8 | streaming tools_used join is sorted (deterministic set) | engine tests |
+| BC9 | telegram poll goroutine joined at shutdown (PollLoop.Wait) | TestPollLoopWaitJoinsShutdown |
+
+Also: REST/gRPC async runs now carry the sync path's 5-minute bound
+(completion still persists on a fresh context).
 
 ## In flight
 
-- Nothing open. Working tree carries docs-only additions.
+- Nothing open. Closeout simplify review ran over the full branch diff;
+  only doc updates may remain uncommitted.
 
 ## Next steps (candidates, in order)
 
@@ -22,6 +47,20 @@ Ollama LLM + MCP-echo + classifier stage.
    pollable only through agent prompts (deliberate; ADR if needed).
 2. gRPC server-streaming Run (SSE-equivalent) — roadmap item.
 3. Token/price accounting per audit row (Dify node-telemetry pattern).
+4. Merge `refactor/simplify-pass` → main once reviewed.
+
+## Deferred by the pass (do NOT blindly do later)
+
+- Bounding telegram pool.Stop() itself — touches the claim-then-send net
+  for a hang-only benefit.
+- Batching Enqueue/ClaimReply into the store batcher (durability
+  exceptions are documented in code).
+- Consolidating store.batcher / telegram WorkerPool / PollLoop into one
+  helper — drain and DB-is-the-queue semantics differ; forcing them in
+  is a trap.
+- Exporting writeJSON to internal/httpx (zero consumers), merging
+  sseWrite into writeJSON (SSE legitimately differs).
+- Full list with reasons: plan file jolly-sauteeing-candle.md "Skip list".
 
 ## Open questions / traps
 
@@ -30,6 +69,9 @@ Ollama LLM + MCP-echo + classifier stage.
   lessons-learned).
 - Small-model stages are retry-bounded, not deterministic — keep the
   retries when touching scripts/e2e.sh s11.
+- `make cover` can FAIL spuriously after test-cache invalidation
+  mid-session; `go clean -testcache` then rerun. Real gate excludes
+  internal/pb (generated stubs) via Makefile PKGS.
 
 ## Pointers
 

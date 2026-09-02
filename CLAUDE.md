@@ -47,6 +47,9 @@ internal/mcpclient       mark3labs/mcp-go client + adapter to framework tools
 internal/provider        env-switched agent factory (openai | openai-compat | anthropic | foundry)
 internal/trace           trace-ID minting/propagation (joins logs, audit rows, answers)
 internal/config          env parsing, validation, fast/smart model tiers
+internal/logx            slog construction (level + format) and nil→default guards
+internal/loop            loop.Periodic: one tested shape for periodic background work
+internal/task            task.Group: detached-but-bounded goroutines shutdown can join
 examples/mcp-echo-server reference for the MCP SERVER side (mcp-go)
 docs/                   memory that survives /clear: research/ (sourced findings),
                          lessons-learned.md (append-only), decisions/ (ADRs),
