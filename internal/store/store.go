@@ -13,7 +13,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	_ "modernc.org/sqlite" // registers the "sqlite" driver (pure Go, no CGo)
@@ -32,8 +32,9 @@ type Store struct {
 	writes chan writeOp
 	quit   chan struct{}
 	done   chan struct{}
-	mu     sync.RWMutex // guards closed
-	closed bool
+	// closed is an atomic so enqueue — the audit hot path — reads it
+	// lock-free; only Close flips it (once, via CompareAndSwap).
+	closed atomic.Bool
 }
 
 type writeOp struct {
@@ -81,14 +82,9 @@ func Open(path string) (*Store, error) {
 
 // Close stops the batcher (draining queued writes) and closes the database.
 func (s *Store) Close() error {
-	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		return nil
+	if !s.closed.CompareAndSwap(false, true) {
+		return nil // already closed
 	}
-	s.closed = true
-	s.mu.Unlock()
-
 	close(s.quit)
 	<-s.done // batcher drains what it can, then exits
 	return s.db.Close()
@@ -97,10 +93,7 @@ func (s *Store) Close() error {
 // enqueue queues a write for the batcher. Fails fast if the queue is full or
 // the store is closing — never blocks the caller.
 func (s *Store) enqueue(query string, args []any, done chan error) error {
-	s.mu.RLock()
-	closed := s.closed
-	s.mu.RUnlock()
-	if closed {
+	if s.closed.Load() {
 		return fmt.Errorf("store closed")
 	}
 	select {
@@ -215,6 +208,30 @@ func (s *Store) QueryRow(ctx context.Context, query string, args ...any) *sql.Ro
 	return s.db.QueryRowContext(ctx, query, args...)
 }
 
+// QueryAll runs a SELECT and scans every row through fn into a slice — the
+// loop shape (Query → defer Close → scan → rows.Err) every read-side caller
+// shared. fn's error aborts the walk; rows.Err() is always surfaced, so an
+// iteration failure can't silently truncate a result (that strictness fixed
+// three stats loops that used to skip it). Deliberately NOT used by
+// internal/router's rules loading: the router must stay import-free of this
+// package.
+func QueryAll[T any](ctx context.Context, s *Store, query string, scan func(*sql.Rows) (T, error), args ...any) ([]T, error) {
+	rows, err := s.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []T
+	for rows.Next() {
+		v, err := scan(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
 // Ping verifies the database is reachable (readiness probe).
 func (s *Store) Ping(ctx context.Context) error {
 	return s.db.PingContext(ctx)
@@ -242,39 +259,14 @@ func (s *Store) ExecResult(ctx context.Context, query string, args ...any) (sql.
 	return s.db.ExecContext(ctx, query, args...)
 }
 
-// migrate creates tables idempotently, versioned by PRAGMA user_version.
-func (s *Store) migrate() error {
-	var version int
-	if err := s.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
-		return fmt.Errorf("reading user_version: %w", err)
-	}
-	if version < 1 {
-		if err := s.migrateV1(); err != nil {
-			return err
-		}
-		version = 1
-	}
-	if version < 2 {
-		if err := s.migrateV2(); err != nil {
-			return err
-		}
-	}
-	if version < 3 {
-		if err := s.migrateV3(); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// migrateV1 is the Phase-1 schema: audit trail, fallback corpus, answers,
-// router rules.
-func (s *Store) migrateV1() error {
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	stmts := []string{
+// migrations is the schema ladder, applied in order by migrate(). Each
+// entry is one transaction ending in its PRAGMA user_version bump; the
+// version guard is what makes each run exactly once — v3's ALTER is NOT
+// idempotent, only the guard makes re-opening a v3 database safe.
+var migrations = [][]string{
+	{
+		// v1, the Phase-1 schema: audit trail, fallback corpus, answers,
+		// router rules.
 		`CREATE TABLE IF NOT EXISTS audit_events (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			ts TEXT NOT NULL,
@@ -319,25 +311,11 @@ func (s *Store) migrateV1() error {
 			created_ts TEXT NOT NULL
 		)`,
 		`PRAGMA user_version = 1`,
-	}
-	for _, stmt := range stmts {
-		if _, err := tx.Exec(stmt); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("migrating to v1: %w", err)
-		}
-	}
-	return tx.Commit()
-}
-
-// migrateV2 adds the Telegram interface substrate: the durable inbox
-// (idempotent on update_id — the at-least-once delivery anchor) and a small
-// kv table for transport state like the long-poll high-water mark.
-func (s *Store) migrateV2() error {
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	stmts := []string{
+	},
+	{
+		// v2, the Telegram substrate: the durable inbox (idempotent on
+		// update_id — the at-least-once delivery anchor) and a small kv
+		// table for transport state like the long-poll high-water mark.
 		`CREATE TABLE IF NOT EXISTS telegram_inbox (
 			update_id INTEGER PRIMARY KEY,
 			chat_id INTEGER NOT NULL,
@@ -354,25 +332,11 @@ func (s *Store) migrateV2() error {
 			v TEXT NOT NULL
 		)`,
 		`PRAGMA user_version = 2`,
-	}
-	for _, stmt := range stmts {
-		if _, err := tx.Exec(stmt); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("migrating to v2: %w", err)
-		}
-	}
-	return tx.Commit()
-}
-
-// migrateV3 adds the Phase-3 rule lifecycle: rules carry a state
-// (active | shadow | demoted) and shadow comparisons land in
-// shadow_events for promotion/demotion decisions.
-func (s *Store) migrateV3() error {
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	stmts := []string{
+	},
+	{
+		// v3, the Phase-3 rule lifecycle: rules carry a state
+		// (active | shadow | demoted) and shadow comparisons land in
+		// shadow_events for promotion/demotion decisions.
 		`ALTER TABLE rules ADD COLUMN state TEXT NOT NULL DEFAULT 'active'`,
 		`CREATE TABLE IF NOT EXISTS shadow_events (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -384,11 +348,35 @@ func (s *Store) migrateV3() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_shadow_rule ON shadow_events(rule_name, id)`,
 		`PRAGMA user_version = 3`,
+	},
+}
+
+// migrate creates tables idempotently, versioned by PRAGMA user_version.
+func (s *Store) migrate() error {
+	var version int
+	if err := s.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		return fmt.Errorf("reading user_version: %w", err)
+	}
+	for v, stmts := range migrations {
+		if version < v+1 {
+			if err := s.applyMigration(v+1, stmts); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// applyMigration runs one schema version's statements in a transaction.
+func (s *Store) applyMigration(version int, stmts []string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
 	}
 	for _, stmt := range stmts {
 		if _, err := tx.Exec(stmt); err != nil {
 			tx.Rollback()
-			return fmt.Errorf("migrating to v3: %w", err)
+			return fmt.Errorf("migrating to v%d: %w", version, err)
 		}
 	}
 	return tx.Commit()

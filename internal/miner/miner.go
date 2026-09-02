@@ -64,27 +64,16 @@ func Mine(ctx context.Context, st *store.Store, opts Options, logger *slog.Logge
 		opts.Threshold = 20
 	}
 
-	clusters, err := st.Query(ctx,
-		`SELECT normalized_prompt, COUNT(*) c FROM fallback_events
-		 GROUP BY normalized_prompt HAVING c >= ? ORDER BY c DESC`, opts.Threshold)
-	if err != nil {
-		return nil, err
-	}
-	defer clusters.Close()
-
 	type cluster struct {
 		shape string
 		count int
 	}
-	var eligible []cluster
-	for clusters.Next() {
-		var c cluster
-		if err := clusters.Scan(&c.shape, &c.count); err != nil {
-			return nil, err
-		}
-		eligible = append(eligible, c)
-	}
-	if err := clusters.Err(); err != nil {
+	eligible, err := store.QueryAll(ctx, st, store.FallbackShapeSQL+` HAVING c >= ? ORDER BY c DESC`,
+		func(r *sql.Rows) (cluster, error) {
+			var c cluster
+			return c, r.Scan(&c.shape, &c.count)
+		}, opts.Threshold)
+	if err != nil {
 		return nil, err
 	}
 
