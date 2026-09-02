@@ -82,11 +82,7 @@ func repl(ctx context.Context, eng *engine.Engine, in io.Reader, out io.Writer) 
 		}
 		_, rctx := trace.New(ctx, "")
 		res := eng.Run(rctx, prompt)
-		if res.RuleID != "" {
-			fmt.Fprintf(out, "[%s via %s, %dms]\n", res.DecisionSource, res.RuleID, res.LatencyMS)
-		} else {
-			fmt.Fprintf(out, "[%s, %dms]\n", res.DecisionSource, res.LatencyMS)
-		}
+		fmt.Fprintln(out, res.Header(", "))
 		fmt.Fprintln(out, res.Answer)
 		if errors.Is(ctx.Err(), context.Canceled) {
 			return nil

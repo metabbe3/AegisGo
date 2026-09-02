@@ -135,7 +135,7 @@ func Build(ctx context.Context, cfg config.Config, tier config.Tier,
 					st.Close()
 					return nil, nil, fmt.Errorf("building classifier: %w", err)
 				}
-				classifier = &appClassifier{llm: fa, reg: reg}
+				classifier = &appClassifier{llm: fa, reg: reg, prompt: newClassifierPrompt(reg)}
 				classifierModel = fast
 				logger.Info("classifier tier active (AEGIS_CLASSIFIER=on)", "model", fast)
 			}

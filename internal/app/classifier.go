@@ -20,6 +20,10 @@ import (
 type appClassifier struct {
 	llm engine.LLMRunner
 	reg *tools.Registry
+	// prompt is the full byte-stable prefix (instruction + tool catalog),
+	// built once: the registry is fixed after boot, and re-serializing the
+	// catalog per call would only churn provider prompt caches.
+	prompt string
 }
 
 // classifyInstruction is the byte-stable prefix of the classifier prompt
@@ -31,21 +35,26 @@ Pick the single best tool, or "freeform" when the request needs reasoning, writi
 Example — request "show the first 5 rows of data/sales.csv" → {"tool":"read_csv","args":{"path":"data/sales.csv","max_rows":5}}
 Tool catalog:`
 
-// Classify runs the fast tier for one prompt. ok=false means "not
-// classifiable" — the engine falls through to the smart LLM.
-func (c *appClassifier) Classify(ctx context.Context, prompt string) (string, string, bool) {
+// newClassifierPrompt serializes the byte-stable prompt prefix: the fixed
+// instruction plus the registry's tool catalog and the freeform escape.
+// Called once per boot; only the request line is appended per call.
+func newClassifierPrompt(reg *tools.Registry) string {
 	var sb strings.Builder
 	sb.WriteString(classifyInstruction)
-	for _, t := range c.reg.All() {
+	for _, t := range reg.All() {
 		sb.WriteString("\n- ")
 		sb.WriteString(t.Name())
 		sb.WriteString(": ")
 		sb.WriteString(t.Description())
 	}
-	sb.WriteString("\n- freeform: the request needs reasoning, writing, or no listed tool\n\nRequest: ")
-	sb.WriteString(prompt)
+	sb.WriteString("\n- freeform: the request needs reasoning, writing, or no listed tool")
+	return sb.String()
+}
 
-	resp, err := c.llm.RunText(ctx, sb.String()).Collect()
+// Classify runs the fast tier for one prompt. ok=false means "not
+// classifiable" — the engine falls through to the smart LLM.
+func (c *appClassifier) Classify(ctx context.Context, prompt string) (string, string, bool) {
+	resp, err := c.llm.RunText(ctx, c.prompt+"\n\nRequest: "+prompt).Collect()
 	if err != nil {
 		return "", "", false
 	}
@@ -73,15 +82,13 @@ func (c *appClassifier) Classify(ctx context.Context, prompt string) (string, st
 // parseClassify extracts the model's tool choice. Models wrap JSON in
 // prose and reasoning tags, so the LAST parseable JSON object carrying a
 // string "tool" wins (answers land at the end; Dify strips <think> blocks
-// for the same reason). args may be absent — an empty object is fine for
-// tools without parameters.
+// for the same reason). Scanning from the end returns on the first hit —
+// the same winner the old keep-overwriting forward pass picked, without
+// re-decoding every tail of the text. args may be absent — an empty object
+// is fine for tools without parameters.
 func parseClassify(text string) (string, json.RawMessage, bool) {
 	text = stripThink(text)
-	var (
-		bestTool string
-		bestArgs json.RawMessage
-	)
-	for i := 0; i < len(text); i++ {
+	for i := len(text) - 1; i >= 0; i-- {
 		if text[i] != '{' {
 			continue
 		}
@@ -90,18 +97,14 @@ func parseClassify(text string) (string, json.RawMessage, bool) {
 			Args json.RawMessage `json:"args"`
 		}
 		dec := json.NewDecoder(strings.NewReader(text[i:]))
-		if err := dec.Decode(&m); err != nil || m.Tool == "" {
-			continue
+		if err := dec.Decode(&m); err == nil && m.Tool != "" {
+			if len(m.Args) == 0 {
+				m.Args = json.RawMessage(`{}`)
+			}
+			return m.Tool, m.Args, true
 		}
-		bestTool, bestArgs = m.Tool, m.Args
 	}
-	if bestTool == "" {
-		return "", nil, false
-	}
-	if len(bestArgs) == 0 {
-		bestArgs = json.RawMessage(`{}`)
-	}
-	return bestTool, bestArgs, true
+	return "", nil, false
 }
 
 // stripThink removes <think>…</think> reasoning wrappers some local models

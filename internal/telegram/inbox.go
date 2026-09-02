@@ -122,12 +122,15 @@ func (i *Inbox) MarkStatus(ctx context.Context, updateID int64, status string) e
 		status, time.Now().UTC().Format(time.RFC3339Nano), updateID)
 }
 
-// Unclaim clears a claim whose send failed deterministically, letting a
-// redelivery retry. Never called for crash windows — there the durable
-// claim is exactly what prevents duplicate replies.
-func (i *Inbox) Unclaim(ctx context.Context, updateID int64) error {
+// FailAndReopen marks a claimed row failed and clears its claim in one
+// write, so a redelivery can retry — claim-then-send's rollback for
+// deterministic send failures (API error, rate limit). Never called for
+// crash windows: there the durable claim is exactly what prevents
+// duplicate replies.
+func (i *Inbox) FailAndReopen(ctx context.Context, updateID int64) error {
 	return i.store.Exec(ctx,
-		`UPDATE telegram_inbox SET replied_at=NULL WHERE update_id=?`, updateID)
+		`UPDATE telegram_inbox SET status=?, processed_ts=?, replied_at=NULL WHERE update_id=?`,
+		InboxFailed, time.Now().UTC().Format(time.RFC3339Nano), updateID)
 }
 
 // HighWater returns the last update_id the poll transport may acknowledge

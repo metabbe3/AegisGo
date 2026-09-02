@@ -177,9 +177,8 @@ func TestReleaseOnDeadStore(t *testing.T) {
 	st.Close()
 	d.release(context.Background(), row.UpdateID)
 
-	if !h.saw("telegram: releasing claim") || !h.saw("telegram: unclaiming") {
-		t.Errorf("release failures not logged: releasing=%v unclaiming=%v",
-			h.saw("telegram: releasing claim"), h.saw("telegram: unclaiming"))
+	if !h.saw("telegram: releasing claim") {
+		t.Error("release failure not logged")
 	}
 }
 

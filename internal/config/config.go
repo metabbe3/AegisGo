@@ -177,8 +177,8 @@ func Load() Config {
 		TelegramWorkers:       AtoiDefault(os.Getenv("AEGIS_TELEGRAM_WORKERS"), 4),
 		TelegramAPIBase:       envTrim("AEGIS_TELEGRAM_API_BASE"),
 
-		DownloadTimeoutSecs: AtoiDefault(os.Getenv("AEGIS_DOWNLOAD_TIMEOUT"), 120),
-		DownloadMaxBytes:    int64(AtoiDefault(os.Getenv("AEGIS_DOWNLOAD_MAX_BYTES"), 64<<20)),
+		DownloadTimeoutSecs:  AtoiDefault(os.Getenv("AEGIS_DOWNLOAD_TIMEOUT"), 120),
+		DownloadMaxBytes:     int64(AtoiDefault(os.Getenv("AEGIS_DOWNLOAD_MAX_BYTES"), 64<<20)),
 		DownloadAllowPrivate: onSwitch(envTrim("AEGIS_DOWNLOAD_ALLOW_PRIVATE"), false),
 		Classifier:           envOr("AEGIS_CLASSIFIER", "off"),
 	}

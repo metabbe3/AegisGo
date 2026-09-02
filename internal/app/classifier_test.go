@@ -66,6 +66,7 @@ func TestParseClassify(t *testing.T) {
 		{"no json at all", `I cannot answer that in JSON, sorry.`, "", "", false},
 		{"json without tool key", `{"result":"nope"}`, "", "", false},
 		{"last object with a tool wins", `{"tool":"a"} then {"tool":"read_csv","args":{"path":"b.csv"}}`, "read_csv", `{"path":"b.csv"}`, true},
+		{"later args win too", `{"tool":"csv_stats","args":{"path":"old.csv"}} … {"tool":"read_csv","args":{"path":"new.csv"}}`, "read_csv", `{"path":"new.csv"}`, true},
 		{"tool must be a string", `{"tool":42}`, "", "", false},
 	}
 	for _, tc := range cases {
@@ -108,7 +109,7 @@ func newTestClassifier(t *testing.T, runner *fakeRunner) *appClassifier {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &appClassifier{llm: runner, reg: reg}
+	return &appClassifier{llm: runner, reg: reg, prompt: newClassifierPrompt(reg)}
 }
 
 // TestClassifyHit: the chosen tool runs through the schema-validated

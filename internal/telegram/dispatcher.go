@@ -149,13 +149,12 @@ func (d *Dispatcher) claimAndSend(ctx context.Context, row InboxRow, body string
 }
 
 // release undoes a claim when the send failed deterministically (API error,
-// rate limit) so a redelivery gets another chance.
+// rate limit) so a redelivery gets another chance. One combined UPDATE, not
+// MarkStatus + Unclaim: the half-released middle state (failed but still
+// claimed) serves nobody.
 func (d *Dispatcher) release(ctx context.Context, updateID int64) {
-	if err := d.inbox.MarkStatus(ctx, updateID, InboxFailed); err != nil {
+	if err := d.inbox.FailAndReopen(ctx, updateID); err != nil {
 		d.logger.Error("telegram: releasing claim", "update_id", updateID, "error", err)
-	}
-	if err := d.inbox.Unclaim(ctx, updateID); err != nil {
-		d.logger.Error("telegram: unclaiming", "update_id", updateID, "error", err)
 	}
 }
 
@@ -179,8 +178,7 @@ func formatReply(res engine.Result) string {
 		body = body[:maxReplyLen] + "\n… (truncated)"
 	}
 	if res.RuleID != "" {
-		header := fmt.Sprintf("[%s via %s · %dms]", res.DecisionSource, res.RuleID, res.LatencyMS)
-		return header + "\n" + body
+		return res.Header(" · ") + "\n" + body
 	}
 	return body
 }

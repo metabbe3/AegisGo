@@ -41,10 +41,10 @@ type Readiness interface {
 // Server implements pb.AgentServer.
 type Server struct {
 	pb.UnimplementedAgentServer
-	engine   Engine
-	answers  AnswerStore
+	engine    Engine
+	answers   AnswerStore
 	readiness Readiness
-	logger   *slog.Logger
+	logger    *slog.Logger
 }
 
 // New builds the gRPC server implementation.
@@ -97,10 +97,7 @@ func (s *Server) RunAsync(ctx context.Context, req *pb.RunRequest) (*pb.AsyncAck
 	}
 	go func(ctx context.Context) {
 		res := s.engine.Run(ctx, req.GetPrompt())
-		st := store.AnswerDone
-		if res.DecisionSource == store.SourceError {
-			st = store.AnswerError
-		}
+		st := store.AnswerStatusFor(res.DecisionSource)
 		if err := s.answers.CompleteAnswer(context.Background(), traceID, st, res.Answer); err != nil {
 			s.logger.Error("grpc: completing answer", "trace_id", traceID, "error", err)
 		}

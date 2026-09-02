@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"strings"
 	"text/tabwriter"
 
 	"aegisgo/internal/config"
@@ -63,13 +64,11 @@ func rulesCmd(ctx context.Context, st *store.Store, cfg config.Config, args []st
 		if err != nil {
 			return err
 		}
-		w := tabwriter.NewWriter(stdout, 0, 2, 2, ' ', 0)
-		fmt.Fprintln(w, "NAME\tSTATE\tORIGIN\tENABLED\tTOOL\tPATTERN")
-		for _, r := range rules {
-			fmt.Fprintf(w, "%v\t%v\t%v\t%v\t%v\t%v\n",
-				r["name"], r["state"], r["origin"], r["enabled"], r["tool"], r["pattern"])
+		rows := make([][]any, len(rules))
+		for i, r := range rules {
+			rows[i] = []any{r["name"], r["state"], r["origin"], r["enabled"], r["tool"], r["pattern"]}
 		}
-		return w.Flush()
+		return writeTable(stdout, []string{"NAME", "STATE", "ORIGIN", "ENABLED", "TOOL", "PATTERN"}, rows)
 	case "mine":
 		fs := flag.NewFlagSet("mine", flag.ContinueOnError)
 		th := fs.Int("threshold", cfg.MinerThreshold, "minimum cluster size")
@@ -122,11 +121,26 @@ func replayCmd(ctx context.Context, st *store.Store, traceID string, stdout io.W
 	if len(trail) == 0 {
 		return fmt.Errorf("no audit rows for trace %s", traceID)
 	}
+	rows := make([][]any, len(trail))
+	for i, a := range trail {
+		rows[i] = []any{a.TS, a.Interface, a.DecisionSource, a.RuleID, a.Model,
+			fmt.Sprintf("%dms", a.LatencyMS), a.Outcome}
+	}
+	return writeTable(stdout, []string{"TS", "IFACE", "SOURCE", "RULE", "MODEL", "LATENCY", "OUTCOME"}, rows)
+}
+
+// writeTable renders header + rows as an aligned table with the ctl
+// conventions (tabwriter, 2-space padding) — one spelling of "print an
+// admin listing" for the rules and replay commands.
+func writeTable(stdout io.Writer, header []string, rows [][]any) error {
 	w := tabwriter.NewWriter(stdout, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(w, "TS\tIFACE\tSOURCE\tRULE\tMODEL\tLATENCY\tOUTCOME")
-	for _, a := range trail {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%dms\t%s\n",
-			a.TS, a.Interface, a.DecisionSource, a.RuleID, a.Model, a.LatencyMS, a.Outcome)
+	fmt.Fprintln(w, strings.Join(header, "\t"))
+	for _, row := range rows {
+		vals := make([]string, len(row))
+		for i, v := range row {
+			vals[i] = fmt.Sprint(v)
+		}
+		fmt.Fprintln(w, strings.Join(vals, "\t"))
 	}
 	return w.Flush()
 }

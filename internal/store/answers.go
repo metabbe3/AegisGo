@@ -18,6 +18,18 @@ const (
 // AnswerTTL is how long a completed answer stays pollable.
 const AnswerTTL = 15 * time.Minute
 
+// AnswerStatusFor maps a run's decision_source to the status its parked
+// async answer completes with: only decision_source=error parks a failure
+// marker — every other source (router, classifier, plain LLM, llm_disabled)
+// produced a usable answer. One spelling of the mapping shared by the REST
+// and gRPC async paths.
+func AnswerStatusFor(decisionSource string) string {
+	if decisionSource == SourceError {
+		return AnswerError
+	}
+	return AnswerDone
+}
+
 // Answer is one async result, keyed by trace_id.
 type Answer struct {
 	TraceID string `json:"trace_id"`

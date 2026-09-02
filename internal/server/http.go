@@ -47,10 +47,10 @@ type Readiness interface {
 
 // Deps bundles the handler dependencies.
 type Deps struct {
-	Engine   Engine
-	Answers  AnswerStore
+	Engine    Engine
+	Answers   AnswerStore
 	Readiness Readiness // optional; nil skips the deep check
-	Stats    StatsSource
+	Stats     StatsSource
 	// Webhook, when non-nil, is mounted at POST /telegram/webhook (the
 	// handler itself is built by internal/telegram; the server stays
 	// transport-agnostic).
@@ -138,14 +138,25 @@ type runResponse struct {
 	LatencyMS      int64  `json:"latency_ms"`
 }
 
-func runAgent(w http.ResponseWriter, r *http.Request, d Deps) {
+// decodeRunRequest parses and validates the run body shared by the sync and
+// stream handlers: a 1 MiB cap and the same two 400s. false means the
+// response is already written.
+func decodeRunRequest(w http.ResponseWriter, r *http.Request) (runRequest, bool) {
 	var req runRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
-		return
+		return req, false
 	}
 	if strings.TrimSpace(req.Prompt) == "" {
 		writeError(w, http.StatusBadRequest, "prompt is required")
+		return req, false
+	}
+	return req, true
+}
+
+func runAgent(w http.ResponseWriter, r *http.Request, d Deps) {
+	req, ok := decodeRunRequest(w, r)
+	if !ok {
 		return
 	}
 
@@ -159,10 +170,7 @@ func runAgent(w http.ResponseWriter, r *http.Request, d Deps) {
 		}
 		go func(ctx context.Context) {
 			res := d.Engine.Run(ctx, req.Prompt)
-			status := store.AnswerDone
-			if res.DecisionSource == store.SourceError {
-				status = store.AnswerError
-			}
+			status := store.AnswerStatusFor(res.DecisionSource)
 			if err := d.Answers.CompleteAnswer(context.Background(), traceID, status, res.Answer); err != nil {
 				d.Logger.Error("completing answer", "trace_id", traceID, "error", err)
 			}
@@ -194,13 +202,8 @@ func runAgent(w http.ResponseWriter, r *http.Request, d Deps) {
 // Both router hits (deterministic, chunked) and LLM runs (provider deltas)
 // use the same wire shape.
 func runAgentStream(w http.ResponseWriter, r *http.Request, d Deps) {
-	var req runRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
-		return
-	}
-	if strings.TrimSpace(req.Prompt) == "" {
-		writeError(w, http.StatusBadRequest, "prompt is required")
+	req, ok := decodeRunRequest(w, r)
+	if !ok {
 		return
 	}
 	fl, ok := w.(http.Flusher)

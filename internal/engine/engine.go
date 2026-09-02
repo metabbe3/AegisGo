@@ -46,6 +46,17 @@ type Result struct {
 	LatencyMS      int64
 }
 
+// Header renders the one-line decision header every human interface shows
+// before the answer: "[source via rule<sep>123ms]", or "[source<sep>123ms]"
+// when no rule fired. sep joins the fields — ", " for terminals, " · " for
+// Telegram — so the cost behavior stays visible on both.
+func (r Result) Header(sep string) string {
+	if r.RuleID != "" {
+		return fmt.Sprintf("[%s via %s%s%dms]", r.DecisionSource, r.RuleID, sep, r.LatencyMS)
+	}
+	return fmt.Sprintf("[%s%s%dms]", r.DecisionSource, sep, r.LatencyMS)
+}
+
 // PromoteAfter is the consecutive-agreement streak that promotes a shadow
 // rule to active. A field so tests (and only tests) can lower it.
 var PromoteAfter = 5
