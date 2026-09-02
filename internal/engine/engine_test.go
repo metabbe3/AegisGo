@@ -6,6 +6,7 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/microsoft/agent-framework-go/agent"
@@ -630,5 +631,60 @@ func TestClassifierStreamingEmits(t *testing.T) {
 	if n := countRows(t, st, `SELECT COUNT(*) FROM fallback_events
 		WHERE tools_used='csv_stats'`); n != 1 {
 		t.Errorf("classifier corpus rows = %d, want 1", n)
+	}
+}
+
+// TestRunStreamingShadowExecutesToolOnce pins the streaming shadow
+// contract: RunStreaming routes (executing the matched tool once) and must
+// never re-route internally. The old implementation delegated shadow rules
+// to Run, which routed AGAIN — double side effects for tools like make_dir
+// or download when reached through ?stream=1.
+func TestRunStreamingShadowExecutesToolOnce(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		llm  LLMRunner
+	}{
+		{"llm on", &fakeLLM{}},
+		{"llm off", nil}, // shadow degrades to the rule's answer
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls atomic.Int32
+			ct, err := tools.New(tools.Config{
+				Name: "count_me", Description: "increments a counter for the test",
+			}, func(_ context.Context, _ struct{}) (string, error) {
+				calls.Add(1)
+				return "counted", nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			reg, err := tools.NewRegistry(ct)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r, err := router.New(reg, []router.RuleDef{{
+				Name: "count_me", Pattern: "count me", Tool: "count_me",
+				ArgsTemplate: "{}", Origin: "mined", State: router.RuleShadow,
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			st, err := store.Open(":memory:")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { st.Close() })
+			e := &Engine{Router: r, LLM: tc.llm, Store: st, IFace: store.IFaceCLI}
+
+			_, ctx := trace.New(context.Background(), "")
+			res := e.RunStreaming(ctx, "count me", func(string) error { return nil })
+
+			if got := calls.Load(); got != 1 {
+				t.Errorf("tool executed %d times, want exactly 1", got)
+			}
+			if res.DecisionSource == "" {
+				t.Error("decision_source empty — every run reports one (Hard Rule 6)")
+			}
+		})
 	}
 }

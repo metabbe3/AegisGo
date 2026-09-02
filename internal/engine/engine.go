@@ -108,16 +108,7 @@ func (e *Engine) Run(ctx context.Context, prompt string) Result {
 			// rule anyway (never worse than the fallback).
 			return e.finishRouter(ctx, d, prompt, traceID, start)
 		}
-		res := Result{
-			Answer:         "No deterministic rule matched and the LLM fallback is disabled (AEGIS_LLM=off).",
-			DecisionSource: store.SourceLLMOff,
-			TraceID:        traceID,
-		}
-		e.audit(ctx, store.AuditEvent{
-			TraceID: traceID, DecisionSource: store.SourceLLMOff,
-			Prompt: prompt, LatencyMS: ms(time.Since(start)),
-		})
-		return res
+		return e.finishLLMOff(ctx, traceID, prompt, start)
 	}
 
 	// 2.5 Fast tier: on a miss, the classifier may resolve the prompt with
@@ -125,79 +116,27 @@ func (e *Engine) Run(ctx context.Context, prompt string) Result {
 	//     when the LLM is on; declining falls through to the fallback below.
 	if !d.Handled && e.Classifier != nil {
 		if answer, tool, ok := e.Classifier.Classify(ctx, prompt); ok {
-			latency := ms(time.Since(start))
-			// Classifier hits are tool-choice-labeled corpus: the miner
-			// graduates recurring shapes into regex rules, so known
-			// patterns decay from one cheap call to zero LLM calls.
-			e.Store.RecordFallback(store.FallbackEvent{
-				TraceID:          traceID,
-				NormalizedPrompt: store.NormalizePrompt(prompt),
-				RawPrompt:        prompt,
-				ToolsUsed:        tool,
-				Model:            e.ClassifierModel,
-			})
-			e.audit(ctx, store.AuditEvent{
-				TraceID: traceID, DecisionSource: store.SourceLLMClassifier,
-				Prompt: prompt, Model: e.ClassifierModel, LatencyMS: latency,
-			})
-			return Result{Answer: answer, DecisionSource: store.SourceLLMClassifier,
-				TraceID: traceID, LatencyMS: latency}
+			return e.finishClassifier(ctx, answer, tool, traceID, prompt, start)
 		}
 	}
 
 	// 3a. Shadow evaluation: the LLM runs; the rule is compared, not
 	//     necessarily answered from (Decision.AnswerFromRule decides).
 	if d.Handled && d.Evaluate {
-		resp, err := e.LLM.RunText(ctx, prompt).Collect()
-		latency := ms(time.Since(start))
-		if err != nil {
-			// Comparison impossible; the rule's answer is the safe path.
-			return e.finishRouter(ctx, d, prompt, traceID, start)
-		}
-		llmTools := ToolNames(resp)
-		agreed := slices.Contains(llmTools, d.Tool)
-		if err := e.Store.RecordShadow(ctx, store.ShadowEvent{
-			RuleName: d.RuleID, TraceID: traceID, Agreed: agreed, LLMTools: llmTools,
-		}); err != nil {
-			slog.WarnContext(ctx, "recording shadow event", "rule", d.RuleID, "error", err)
-		}
-		e.evaluateLifecycle(ctx, d, agreed)
-
-		if d.AnswerFromRule {
-			// Sampled active rule: the rule answers; the LLM only checked.
-			return e.finishRouter(ctx, d, prompt, traceID, start)
-		}
-		// Shadow rule: the LLM answers while the rule learns.
-		res := Result{Answer: resp.String(), DecisionSource: store.SourceLLM,
-			RuleID: d.RuleID, TraceID: traceID, LatencyMS: latency}
-		e.audit(ctx, store.AuditEvent{
-			TraceID: traceID, DecisionSource: store.SourceLLM, RuleID: d.RuleID,
-			Prompt: prompt, Model: e.Model, LatencyMS: latency,
-		})
-		e.recordFallback(ctx, traceID, prompt, resp)
-		return res
+		return e.finishShadow(ctx, d, prompt, traceID, start)
 	}
 
 	// 3b. LLM fallback — the only path that costs money on a miss.
 	resp, err := e.LLM.RunText(ctx, prompt).Collect()
 	latency := ms(time.Since(start))
 	if err != nil {
-		e.audit(ctx, store.AuditEvent{
-			TraceID: traceID, DecisionSource: store.SourceError,
-			Prompt: prompt, Model: e.Model, LatencyMS: latency, Outcome: "error",
-		})
-		return Result{
-			Answer:         fmt.Sprintf("LLM run failed: %s", err),
-			DecisionSource: store.SourceError,
-			TraceID:        traceID,
-			LatencyMS:      latency,
-		}
+		return e.finishLLMError(ctx, err, traceID, prompt, start)
 	}
 	e.audit(ctx, store.AuditEvent{
 		TraceID: traceID, DecisionSource: store.SourceLLM,
 		Prompt: prompt, Model: e.Model, LatencyMS: latency,
 	})
-	e.recordFallback(ctx, traceID, prompt, resp)
+	e.recordFallback(traceID, prompt, resp)
 	return Result{Answer: resp.String(), DecisionSource: store.SourceLLM, TraceID: traceID, LatencyMS: latency}
 }
 
@@ -206,67 +145,51 @@ func (e *Engine) Run(ctx context.Context, prompt string) Result {
 // path.
 const streamChunkLen = 256
 
+// llmOffAnswer is the kill-switch miss message (AEGIS_LLM=off).
+const llmOffAnswer = "No deterministic rule matched and the LLM fallback is disabled (AEGIS_LLM=off)."
+
 // RunStreaming is Run with an emit callback: every path delivers its
 // output incrementally. Router hits chunk their deterministic answer;
-// shadow evaluations fall back to a single synchronous chunk (comparison
-// logic stays in Run); LLM fallbacks forward text deltas as they arrive.
+// shadow evaluations run synchronously (the LLM's answer, one chunk);
+// LLM fallbacks forward text deltas as they arrive. Every branch shares
+// Run's tail helpers, so the decision/audit contract is spelled once.
 func (e *Engine) RunStreaming(ctx context.Context, prompt string, emit func(chunk string) error) Result {
 	traceID := trace.From(ctx)
 	start := time.Now()
 
 	d := e.Router.Handle(ctx, prompt)
 
-	// Deterministic path (including sampled evaluations whose answer comes
-	// from the rule): slice the known answer.
-	if d.Handled && !d.Evaluate {
-		res := e.finishRouter(ctx, d, prompt, traceID, start)
-		emitChunks(res.Answer, emit)
-		return res
-	}
-	if d.Handled && d.Evaluate && d.AnswerFromRule {
-		// Sampled active rule — rule answers; run the comparison inline.
-		e.compareInline(ctx, d, prompt)
-		res := e.finishRouter(ctx, d, prompt, traceID, start)
-		emitChunks(res.Answer, emit)
-		return res
-	}
-	if d.Handled && d.Evaluate {
-		// Shadow-state rule: run synchronously (LLM answers), emit once.
-		res := e.Run(ctx, prompt)
-		emitChunks(res.Answer, emit)
-		return res
-	}
-	if e.LLM == nil {
-		res := Result{
-			Answer:         "No deterministic rule matched and the LLM fallback is disabled (AEGIS_LLM=off).",
-			DecisionSource: store.SourceLLMOff, TraceID: traceID,
+	// Deterministic path: slice the router's answer. This covers sampled
+	// evaluations (compareInline runs the check alongside) and shadow rules
+	// without an LLM (nothing to compare — the rule answers, Run's degrade).
+	if d.Handled && (e.LLM == nil || !d.Evaluate || d.AnswerFromRule) {
+		if d.Evaluate {
+			e.compareInline(ctx, d, prompt)
 		}
-		e.audit(ctx, store.AuditEvent{
-			TraceID: traceID, DecisionSource: store.SourceLLMOff,
-			Prompt: prompt, LatencyMS: ms(time.Since(start)),
-		})
+		res := e.finishRouter(ctx, d, prompt, traceID, start)
+		emitChunks(res.Answer, emit)
+		return res
+	}
+
+	// Shadow evaluation with an LLM: finishShadow consumes the ALREADY-
+	// ROUTED decision, so the tool executes exactly once (never re-route).
+	if d.Handled {
+		res := e.finishShadow(ctx, d, prompt, traceID, start)
+		emitChunks(res.Answer, emit)
+		return res
+	}
+
+	if e.LLM == nil {
+		res := e.finishLLMOff(ctx, traceID, prompt, start)
 		emitChunks(res.Answer, emit)
 		return res
 	}
 
 	// Fast tier (same placement as Run: miss + LLM on). The deterministic
 	// answer is chunked through the same SSE contract as everything else.
-	if !d.Handled && e.Classifier != nil {
+	if e.Classifier != nil {
 		if answer, tool, ok := e.Classifier.Classify(ctx, prompt); ok {
-			latency := ms(time.Since(start))
-			e.Store.RecordFallback(store.FallbackEvent{
-				TraceID:          traceID,
-				NormalizedPrompt: store.NormalizePrompt(prompt),
-				RawPrompt:        prompt,
-				ToolsUsed:        tool,
-				Model:            e.ClassifierModel,
-			})
-			e.audit(ctx, store.AuditEvent{
-				TraceID: traceID, DecisionSource: store.SourceLLMClassifier,
-				Prompt: prompt, Model: e.ClassifierModel, LatencyMS: latency,
-			})
-			res := Result{Answer: answer, DecisionSource: store.SourceLLMClassifier,
-				TraceID: traceID, LatencyMS: latency}
+			res := e.finishClassifier(ctx, answer, tool, traceID, prompt, start)
 			emitChunks(res.Answer, emit)
 			return res
 		}
@@ -302,12 +225,8 @@ func (e *Engine) RunStreaming(ctx context.Context, prompt string, emit func(chun
 	}
 	latency := ms(time.Since(start))
 	if streamErr != nil {
-		e.audit(ctx, store.AuditEvent{
-			TraceID: traceID, DecisionSource: store.SourceError,
-			Prompt: prompt, Model: e.Model, LatencyMS: latency, Outcome: "error",
-		})
-		res := Result{Answer: fmt.Sprintf("LLM run failed: %s", streamErr),
-			DecisionSource: store.SourceError, TraceID: traceID, LatencyMS: latency}
+		// Deltas were already streamed; the failure notice is chunked too.
+		res := e.finishLLMError(ctx, streamErr, traceID, prompt, start)
 		emitChunks(res.Answer, emit)
 		return res
 	}
@@ -315,15 +234,8 @@ func (e *Engine) RunStreaming(ctx context.Context, prompt string, emit func(chun
 	// Sorted so corpus rows are deterministic despite the map's random
 	// iteration order (same tool set either way).
 	toolNames := slices.Sorted(maps.Keys(tools))
-	e.Store.RecordFallback(store.FallbackEvent{
-		TraceID:          traceID,
-		NormalizedPrompt: store.NormalizePrompt(prompt),
-		RawPrompt:        prompt,
-		ToolsUsed:        strings.Join(toolNames, ","),
-		Model:            e.Model,
-		TokensIn:         int(usage.InputTokenCount),
-		TokensOut:        int(usage.OutputTokenCount),
-	})
+	e.recordFallbackParts(traceID, prompt, strings.Join(toolNames, ","), e.Model,
+		int(usage.InputTokenCount), int(usage.OutputTokenCount))
 	e.audit(ctx, store.AuditEvent{
 		TraceID: traceID, DecisionSource: store.SourceLLM,
 		Prompt: prompt, Model: e.Model, LatencyMS: latency,
@@ -338,9 +250,17 @@ func (e *Engine) compareInline(ctx context.Context, d router.Decision, prompt st
 	if e.LLM == nil {
 		return
 	}
+	e.compareShadow(ctx, d, prompt)
+}
+
+// compareShadow runs the LLM for an evaluate-rule, records the tool-choice
+// agreement, and advances the rule's lifecycle. It never chooses the
+// answer; nil means the comparison was unavailable (the rule's answer
+// stands).
+func (e *Engine) compareShadow(ctx context.Context, d router.Decision, prompt string) *agent.Response {
 	resp, err := e.LLM.RunText(ctx, prompt).Collect()
 	if err != nil {
-		return // comparison unavailable; the rule's answer stands
+		return nil // comparison unavailable; the rule's answer stands
 	}
 	llmTools := ToolNames(resp)
 	agreed := slices.Contains(llmTools, d.Tool)
@@ -350,6 +270,7 @@ func (e *Engine) compareInline(ctx context.Context, d router.Decision, prompt st
 		slog.WarnContext(ctx, "recording shadow event", "rule", d.RuleID, "error", err)
 	}
 	e.evaluateLifecycle(ctx, d, agreed)
+	return resp
 }
 
 func emitChunks(s string, emit func(string) error) {
@@ -388,19 +309,91 @@ func (e *Engine) finishRouter(ctx context.Context, d router.Decision, prompt, tr
 	return res
 }
 
-// recordFallback persists the mining corpus: normalized shape plus the
-// tools the LLM actually chose (the miner's dominant-tool signal).
-func (e *Engine) recordFallback(ctx context.Context, traceID, prompt string, resp *agent.Response) {
+// recordFallback persists the mining corpus from a collected LLM response:
+// normalized shape plus the tools the LLM actually chose (the miner's
+// dominant-tool signal).
+func (e *Engine) recordFallback(traceID, prompt string, resp *agent.Response) {
 	tin, tout := tokenUsage(resp)
+	e.recordFallbackParts(traceID, prompt, strings.Join(ToolNames(resp), ","), e.Model, tin, tout)
+}
+
+// recordFallbackParts persists one mining-corpus row from raw parts — the
+// spelling every fallback site (sync LLM, streaming LLM, classifier) shares.
+func (e *Engine) recordFallbackParts(traceID, prompt, toolsUsed, model string, tokensIn, tokensOut int) {
 	e.Store.RecordFallback(store.FallbackEvent{
 		TraceID:          traceID,
 		NormalizedPrompt: store.NormalizePrompt(prompt),
 		RawPrompt:        prompt,
-		ToolsUsed:        strings.Join(ToolNames(resp), ","),
-		Model:            e.Model,
-		TokensIn:         tin,
-		TokensOut:        tout,
+		ToolsUsed:        toolsUsed,
+		Model:            model,
+		TokensIn:         tokensIn,
+		TokensOut:        tokensOut,
 	})
+}
+
+// finishLLMOff is the kill-switch miss: no rule matched and there is no
+// provider to ask. The run still audits (decision_source=llm_disabled).
+func (e *Engine) finishLLMOff(ctx context.Context, traceID, prompt string, start time.Time) Result {
+	e.audit(ctx, store.AuditEvent{
+		TraceID: traceID, DecisionSource: store.SourceLLMOff,
+		Prompt: prompt, LatencyMS: ms(time.Since(start)),
+	})
+	return Result{Answer: llmOffAnswer, DecisionSource: store.SourceLLMOff, TraceID: traceID}
+}
+
+// finishClassifier records a fast-tier hit. Classifier hits are
+// tool-choice-labeled corpus: the miner graduates recurring shapes into
+// regex rules, so known patterns decay from one cheap call to zero LLM
+// calls. No token counts — the fast tier's usage isn't collected here.
+func (e *Engine) finishClassifier(ctx context.Context, answer, tool, traceID, prompt string, start time.Time) Result {
+	latency := ms(time.Since(start))
+	e.recordFallbackParts(traceID, prompt, tool, e.ClassifierModel, 0, 0)
+	e.audit(ctx, store.AuditEvent{
+		TraceID: traceID, DecisionSource: store.SourceLLMClassifier,
+		Prompt: prompt, Model: e.ClassifierModel, LatencyMS: latency,
+	})
+	return Result{Answer: answer, DecisionSource: store.SourceLLMClassifier,
+		TraceID: traceID, LatencyMS: latency}
+}
+
+// finishLLMError is the fallback's failure tail: a Result that still
+// reports decision_source=error (Hard Rule 6) plus its audit row.
+func (e *Engine) finishLLMError(ctx context.Context, err error, traceID, prompt string, start time.Time) Result {
+	latency := ms(time.Since(start))
+	e.audit(ctx, store.AuditEvent{
+		TraceID: traceID, DecisionSource: store.SourceError,
+		Prompt: prompt, Model: e.Model, LatencyMS: latency, Outcome: "error",
+	})
+	return Result{
+		Answer:         fmt.Sprintf("LLM run failed: %s", err),
+		DecisionSource: store.SourceError,
+		TraceID:        traceID,
+		LatencyMS:      latency,
+	}
+}
+
+// finishShadow completes an evaluate-rule (shadow or sampled) from the
+// ALREADY-ROUTED decision d — the router has executed d's tool once, so
+// this must never re-route (double tool side effects). The LLM runs for
+// comparison; the rule answers when it is sampled (AnswerFromRule) or the
+// comparison is unavailable, else the LLM's answer wins while the rule
+// learns. Callers must guarantee e.LLM != nil.
+func (e *Engine) finishShadow(ctx context.Context, d router.Decision, prompt, traceID string, start time.Time) Result {
+	resp := e.compareShadow(ctx, d, prompt)
+	if resp == nil || d.AnswerFromRule {
+		// Comparison unavailable, or sampled active rule: the rule answers;
+		// the LLM only checked.
+		return e.finishRouter(ctx, d, prompt, traceID, start)
+	}
+	latency := ms(time.Since(start))
+	res := Result{Answer: resp.String(), DecisionSource: store.SourceLLM,
+		RuleID: d.RuleID, TraceID: traceID, LatencyMS: latency}
+	e.audit(ctx, store.AuditEvent{
+		TraceID: traceID, DecisionSource: store.SourceLLM, RuleID: d.RuleID,
+		Prompt: prompt, Model: e.Model, LatencyMS: latency,
+	})
+	e.recordFallback(traceID, prompt, resp)
+	return res
 }
 
 // evaluateLifecycle applies promotion/demotion after a shadow comparison.
