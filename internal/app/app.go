@@ -13,6 +13,7 @@ import (
 
 	"aegisgo/internal/config"
 	"aegisgo/internal/engine"
+	"aegisgo/internal/logx"
 	"aegisgo/internal/mcpclient"
 	"aegisgo/internal/miner"
 	"aegisgo/internal/provider"
@@ -39,9 +40,7 @@ type App struct {
 func Build(ctx context.Context, cfg config.Config, tier config.Tier,
 	iface string, logger *slog.Logger) (*App, func(), error) {
 
-	if logger == nil {
-		logger = slog.Default()
-	}
+	logger = logx.Or(logger)
 	st, err := store.Open(cfg.DBPath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("opening store: %w", err)

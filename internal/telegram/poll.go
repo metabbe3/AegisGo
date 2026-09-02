@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"time"
+
+	"aegisgo/internal/logx"
 )
 
 // Poll defaults.
@@ -28,9 +30,7 @@ type PollLoop struct {
 
 // NewPollLoop builds the poll transport.
 func NewPollLoop(c Client, inbox *Inbox, pool *WorkerPool, logger *slog.Logger) *PollLoop {
-	if logger == nil {
-		logger = slog.Default()
-	}
+	logger = logx.Or(logger)
 	return &PollLoop{client: c, inbox: inbox, pool: pool, logger: logger}
 }
 

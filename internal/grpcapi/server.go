@@ -16,6 +16,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"aegisgo/internal/engine"
+	"aegisgo/internal/logx"
 	pb "aegisgo/internal/pb"
 	"aegisgo/internal/store"
 	"aegisgo/internal/trace"
@@ -49,9 +50,7 @@ type Server struct {
 
 // New builds the gRPC server implementation.
 func New(e Engine, answers AnswerStore, read Readiness, logger *slog.Logger) *Server {
-	if logger == nil {
-		logger = slog.Default()
-	}
+	logger = logx.Or(logger)
 	return &Server{engine: e, answers: answers, readiness: read, logger: logger}
 }
 

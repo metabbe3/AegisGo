@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"aegisgo/internal/engine"
+	"aegisgo/internal/logx"
 	"aegisgo/internal/store"
 	"aegisgo/internal/trace"
 )
@@ -48,9 +49,7 @@ type engineRunner interface {
 // NewDispatcher builds the core. rules may be nil (then /rules says so).
 func NewDispatcher(e engineRunner, c Client, inbox *Inbox,
 	allowChats []int64, rules func() []string, logger *slog.Logger) *Dispatcher {
-	if logger == nil {
-		logger = slog.Default()
-	}
+	logger = logx.Or(logger)
 	allow := make(map[int64]bool, len(allowChats))
 	for _, id := range allowChats {
 		allow[id] = true

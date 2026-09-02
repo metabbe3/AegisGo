@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"aegisgo/internal/engine"
+	"aegisgo/internal/logx"
 	"aegisgo/internal/store"
 	"aegisgo/internal/trace"
 )
@@ -68,9 +69,7 @@ type Deps struct {
 //	POST /v1/agent/run?async=1 enqueue; returns 202 + trace_id
 //	GET  /v1/answers/{trace}   poll an async answer
 func Handler(d Deps) http.Handler {
-	if d.Logger == nil {
-		d.Logger = slog.Default()
-	}
+	d.Logger = logx.Or(d.Logger)
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {

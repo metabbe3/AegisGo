@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"aegisgo/internal/logx"
 )
 
 // Inbox statuses.
@@ -175,9 +177,7 @@ type WorkerPool struct {
 // also wake immediately on Enqueue via Wake).
 func NewWorkerPool(inbox *Inbox, workers int, interval time.Duration,
 	process func(ctx context.Context, row InboxRow), logger *slog.Logger) *WorkerPool {
-	if logger == nil {
-		logger = slog.Default()
-	}
+	logger = logx.Or(logger)
 	return &WorkerPool{
 		inbox: inbox, process: process, workers: workers,
 		interval: interval, logger: logger, wake: make(chan struct{}, 1),

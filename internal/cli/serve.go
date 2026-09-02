@@ -18,6 +18,7 @@ import (
 	"aegisgo/internal/app"
 	"aegisgo/internal/config"
 	"aegisgo/internal/grpcapi"
+	"aegisgo/internal/logx"
 	"aegisgo/internal/server"
 	"aegisgo/internal/store"
 )
@@ -50,7 +51,12 @@ func serve(ctx context.Context, tierFlag string) error {
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	// JSON on stdout for journald/log shippers; SetDefault routes the
+	// package-global slog lines (audit "request", engine lifecycle) into
+	// the same stream instead of the stderr-text default. AEGIS_LOG_LEVEL
+	// finally means something here.
+	logger := logx.New(cfg.LogLevel, os.Stdout, true)
+	slog.SetDefault(logger)
 
 	a, cleanup, err := app.Build(ctx, cfg, tier, store.IFaceREST, logger)
 	if err != nil {

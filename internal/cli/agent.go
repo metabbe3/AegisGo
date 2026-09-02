@@ -15,6 +15,7 @@ import (
 	"aegisgo/internal/app"
 	"aegisgo/internal/config"
 	"aegisgo/internal/engine"
+	"aegisgo/internal/logx"
 	"aegisgo/internal/store"
 	"aegisgo/internal/trace"
 )
@@ -45,8 +46,11 @@ func runAgent(ctx context.Context, tierFlag string, args []string, stdout io.Wri
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt)
 	defer stop()
 
-	a, cleanup, err := app.Build(ctx, cfg, tier, store.IFaceCLI,
-		slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	// Text on stderr keeps stdout clean for answers; SetDefault pulls the
+	// package-global slog lines (audit "request") onto the same handler.
+	logger := logx.New(cfg.LogLevel, os.Stderr, false)
+	slog.SetDefault(logger)
+	a, cleanup, err := app.Build(ctx, cfg, tier, store.IFaceCLI, logger)
 	if err != nil {
 		return err
 	}

@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"aegisgo/internal/logx"
 	"aegisgo/internal/router"
 	"aegisgo/internal/store"
 )
@@ -57,9 +58,7 @@ type Options struct {
 // clusters. It never touches seeded rules and never inserts duplicates
 // (same pattern => skip).
 func Mine(ctx context.Context, st *store.Store, opts Options, logger *slog.Logger) ([]Proposal, error) {
-	if logger == nil {
-		logger = slog.Default()
-	}
+	logger = logx.Or(logger)
 	if opts.Threshold <= 0 {
 		opts.Threshold = 20
 	}
@@ -193,9 +192,7 @@ func Start(ctx context.Context, st *store.Store, opts Options, interval time.Dur
 	if interval <= 0 {
 		return func() {}
 	}
-	if logger == nil {
-		logger = slog.Default()
-	}
+	logger = logx.Or(logger)
 	done := make(chan struct{})
 	var stopOnce sync.Once
 	go func() {

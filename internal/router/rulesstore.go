@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"log/slog"
 	"time"
+
+	"aegisgo/internal/logx"
 )
 
 // rulesstore: the rules table is the hot-reloadable source of truth. On
@@ -71,9 +73,7 @@ type queryer interface {
 // set. reloadEvery <= 0 disables it. The returned stop function ends the
 // loop. A bad row set keeps the previous rules (log, don't crash).
 func StartHotReload(r *Router, q queryer, reloadEvery time.Duration, logger *slog.Logger) (stop func()) {
-	if reloadEvery <= 0 || logger == nil {
-		logger = slog.Default()
-	}
+	logger = logx.Or(logger)
 	if reloadEvery <= 0 {
 		return func() {}
 	}
