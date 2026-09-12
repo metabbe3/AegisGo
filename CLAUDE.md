@@ -143,6 +143,9 @@ serving with zero credentials.
   provider quirks.
 - Tests use fakes (fakeEngine, fakeLLM, in-process MCP, :memory: SQLite);
   no test ever dials a provider.
+- ponytail stays off here (`/ponytail off`) — this repo is already lean;
+  effort-ladder gains are greenfield-only (measured 2026-09-12,
+  docs/research/2026-09-12-ponytail.md in the skills-deck repo).
 
 ## Definition of Done (per change)
 
