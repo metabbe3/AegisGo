@@ -170,10 +170,14 @@ tools, store, or any interface wiring — it exercises the real binaries
 make e2e        # or ./scripts/e2e.sh — needs go, sqlite3, curl, python3
 ```
 
-Twelve stages, each proving one slice: S1 CLI router matrix · S2 workspace
+Thirteen stages, each proving one slice: S0 build + prerequisites ·
+S1 CLI router matrix · S2 workspace
 csv/log/doc reads plus a hot-reloaded `/search` rule (sql_query attach_csv)
 · S3 REST matrix (sync, async 202→poll, SSE, /v1/stats, 404, X-Trace-Id
-echo) · S4 hot reload · S5 gRPC via grpcurl · S6 MCP server attach ·
+echo) · S4 hot reload · S5 gRPC via grpcurl · S5F file tools + background
+jobs (/mkdir, /ls, /download, /job against a real filesystem and a real
+loopback download source — HTTP always, the gRPC half when grpcurl
+exists) · S6 MCP server attach ·
 S7 Telegram against a python3 fake Bot API (poll mode + webhook with
 secret check) · S8 aegis ctl · S9 miner · S10 audit-trail joins · S11 real
 LLM fallback through local Ollama, MCP echo tool included.
@@ -185,8 +189,9 @@ Notes:
   they ever succeed on a Mac, the system_command catalog has drifted.
 - S5 and S11 are optional-but-run-when-present: without grpcurl or an
   Ollama model they print `SKIP` with the fix (`brew install grpcurl`,
-  `ollama pull qwen2.5:0.5b`) and the run still passes.
-- Fixed ports 18080-18083 + 18090, guarded up front; a busy port means a
+  `ollama pull qwen2.5:0.5b`) and the run still passes. (S5F needs no
+  grpcurl: its HTTP half always runs, only its gRPC half is gated.)
+- Fixed ports 18080-18084 + 18090, guarded up front; a busy port means a
   previous run is still alive. Each run gets its own mktemp workspace, so
   back-to-back runs are safe.
 - The script starts (and kills) everything it needs on loopback; if no
