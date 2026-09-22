@@ -1,13 +1,4 @@
-// Command aegisctl is the offline admin tool: it operates directly on the
-// AegisGo database (no server needed) to list/promote/demote router rules,
-// run the miner on demand, print stats, and replay a trace.
-//
-//	aegisctl rules list
-//	aegisctl rules mine [--threshold N]
-//	aegisctl rules promote <name> | demote <name>
-//	aegisctl stats
-//	aegisctl replay <trace-id>
-package main
+package cli
 
 import (
 	"context"
@@ -15,7 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
+	"strings"
 	"text/tabwriter"
 
 	"aegisgo/internal/config"
@@ -23,16 +14,16 @@ import (
 	"aegisgo/internal/store"
 )
 
-func main() {
-	if err := run(os.Args[1:], os.Stdout); err != nil {
-		fmt.Fprintln(os.Stderr, "aegisctl:", err)
-		os.Exit(1)
-	}
-}
-
-// run dispatches one admin subcommand against the database at AEGIS_DB_PATH.
-// stdout is injected (tabwriter target) so tests can capture the tables.
-func run(args []string, stdout io.Writer) error {
+// runCtl is the offline admin tool: it operates directly on the AegisGo
+// database (no server needed) to list/promote/demote router rules, run the
+// miner on demand, print stats, and replay a trace.
+//
+//	aegis ctl rules list
+//	aegis ctl rules mine [--threshold N]
+//	aegis ctl rules promote <name> | demote <name>
+//	aegis ctl stats
+//	aegis ctl replay <trace-id>
+func runCtl(args []string, stdout io.Writer) error {
 	cfg := config.Load()
 	st, err := store.Open(cfg.DBPath)
 	if err != nil {
@@ -42,7 +33,7 @@ func run(args []string, stdout io.Writer) error {
 	ctx := context.Background()
 
 	if len(args) == 0 {
-		return usage()
+		return ctlUsage()
 	}
 	switch args[0] {
 	case "rules":
@@ -51,21 +42,21 @@ func run(args []string, stdout io.Writer) error {
 		return statsCmd(ctx, st, stdout)
 	case "replay":
 		if len(args) != 2 {
-			return fmt.Errorf("usage: aegisctl replay <trace-id>")
+			return fmt.Errorf("usage: aegis ctl replay <trace-id>")
 		}
 		return replayCmd(ctx, st, args[1], stdout)
 	default:
-		return usage()
+		return ctlUsage()
 	}
 }
 
-func usage() error {
-	return fmt.Errorf("usage: aegisctl rules list|mine|promote <name>|demote <name> | stats | replay <trace-id>")
+func ctlUsage() error {
+	return fmt.Errorf("usage: aegis ctl rules list|mine|promote <name>|demote <name> | stats | replay <trace-id>")
 }
 
 func rulesCmd(ctx context.Context, st *store.Store, cfg config.Config, args []string, stdout io.Writer) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: aegisctl rules list|mine|promote <name>|demote <name>")
+		return fmt.Errorf("usage: aegis ctl rules list|mine|promote <name>|demote <name>")
 	}
 	switch args[0] {
 	case "list":
@@ -73,13 +64,11 @@ func rulesCmd(ctx context.Context, st *store.Store, cfg config.Config, args []st
 		if err != nil {
 			return err
 		}
-		w := tabwriter.NewWriter(stdout, 0, 2, 2, ' ', 0)
-		fmt.Fprintln(w, "NAME\tSTATE\tORIGIN\tENABLED\tTOOL\tPATTERN")
-		for _, r := range rules {
-			fmt.Fprintf(w, "%v\t%v\t%v\t%v\t%v\t%v\n",
-				r["name"], r["state"], r["origin"], r["enabled"], r["tool"], r["pattern"])
+		rows := make([][]any, len(rules))
+		for i, r := range rules {
+			rows[i] = []any{r["name"], r["state"], r["origin"], r["enabled"], r["tool"], r["pattern"]}
 		}
-		return w.Flush()
+		return writeTable(stdout, []string{"NAME", "STATE", "ORIGIN", "ENABLED", "TOOL", "PATTERN"}, rows)
 	case "mine":
 		fs := flag.NewFlagSet("mine", flag.ContinueOnError)
 		th := fs.Int("threshold", cfg.MinerThreshold, "minimum cluster size")
@@ -101,12 +90,12 @@ func rulesCmd(ctx context.Context, st *store.Store, cfg config.Config, args []st
 		return nil
 	case "promote":
 		if len(args) != 2 {
-			return fmt.Errorf("usage: aegisctl rules promote <name>")
+			return fmt.Errorf("usage: aegis ctl rules promote <name>")
 		}
 		return st.SetRuleState(ctx, args[1], store.RuleStateActive, true)
 	case "demote":
 		if len(args) != 2 {
-			return fmt.Errorf("usage: aegisctl rules demote <name>")
+			return fmt.Errorf("usage: aegis ctl rules demote <name>")
 		}
 		return st.SetRuleState(ctx, args[1], store.RuleStateDemoted, false)
 	default:
@@ -132,11 +121,26 @@ func replayCmd(ctx context.Context, st *store.Store, traceID string, stdout io.W
 	if len(trail) == 0 {
 		return fmt.Errorf("no audit rows for trace %s", traceID)
 	}
+	rows := make([][]any, len(trail))
+	for i, a := range trail {
+		rows[i] = []any{a.TS, a.Interface, a.DecisionSource, a.RuleID, a.Model,
+			fmt.Sprintf("%dms", a.LatencyMS), a.Outcome}
+	}
+	return writeTable(stdout, []string{"TS", "IFACE", "SOURCE", "RULE", "MODEL", "LATENCY", "OUTCOME"}, rows)
+}
+
+// writeTable renders header + rows as an aligned table with the ctl
+// conventions (tabwriter, 2-space padding) — one spelling of "print an
+// admin listing" for the rules and replay commands.
+func writeTable(stdout io.Writer, header []string, rows [][]any) error {
 	w := tabwriter.NewWriter(stdout, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(w, "TS\tIFACE\tSOURCE\tRULE\tMODEL\tLATENCY\tOUTCOME")
-	for _, a := range trail {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%dms\t%s\n",
-			a.TS, a.Interface, a.DecisionSource, a.RuleID, a.Model, a.LatencyMS, a.Outcome)
+	fmt.Fprintln(w, strings.Join(header, "\t"))
+	for _, row := range rows {
+		vals := make([]string, len(row))
+		for i, v := range row {
+			vals[i] = fmt.Sprint(v)
+		}
+		fmt.Fprintln(w, strings.Join(vals, "\t"))
 	}
 	return w.Flush()
 }

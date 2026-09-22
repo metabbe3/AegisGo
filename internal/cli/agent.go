@@ -1,9 +1,4 @@
-// Command aegis-agent runs the AegisGo hybrid agent from the command line:
-// one-shot with a prompt argument, or interactive (no argument). The
-// deterministic router answers matching commands instantly with zero LLM
-// cost; everything else falls back to the configured provider. All
-// configuration is environment-driven (see internal/config).
-package main
+package cli
 
 import (
 	"bufio"
@@ -20,23 +15,28 @@ import (
 	"aegisgo/internal/app"
 	"aegisgo/internal/config"
 	"aegisgo/internal/engine"
+	"aegisgo/internal/logx"
 	"aegisgo/internal/store"
 	"aegisgo/internal/trace"
 )
 
-func main() {
-	tierFlag := flag.String("tier", "smart", "model tier: fast or smart (see AEGIS_MODEL_FAST / AEGIS_MODEL_SMART)")
-	flag.Parse()
-
-	if err := run(context.Background(), *tierFlag, flag.Args(), os.Stdout); err != nil {
-		fmt.Fprintln(os.Stderr, "aegis-agent:", err)
-		os.Exit(1)
+// agentCmd parses agent flags (--tier) and delegates to runAgent. The
+// prompt is everything after the flags, joined with spaces — flags after
+// the first prompt word become prompt text, matching Go's flag semantics.
+func agentCmd(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("aegis agent", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	tierFlag := fs.String("tier", "smart", "model tier: fast or smart (see AEGIS_MODEL_FAST / AEGIS_MODEL_SMART)")
+	if err := fs.Parse(args); err != nil {
+		return err
 	}
+	return runAgent(ctx, *tierFlag, fs.Args(), stdout)
 }
 
-// run boots the app and answers one prompt or drops into the REPL. stdout is
-// injected so tests can capture the user-facing stream; logs stay on stderr.
-func run(ctx context.Context, tierFlag string, args []string, stdout io.Writer) error {
+// runAgent boots the app and answers one prompt or drops into the REPL.
+// stdout is injected so tests can capture the user-facing stream; logs stay
+// on stderr.
+func runAgent(ctx context.Context, tierFlag string, args []string, stdout io.Writer) error {
 	tier, err := config.ParseTier(tierFlag)
 	if err != nil {
 		return err
@@ -46,8 +46,11 @@ func run(ctx context.Context, tierFlag string, args []string, stdout io.Writer) 
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt)
 	defer stop()
 
-	a, cleanup, err := app.Build(ctx, cfg, tier, store.IFaceCLI,
-		slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	// Text on stderr keeps stdout clean for answers; SetDefault pulls the
+	// package-global slog lines (audit "request") onto the same handler.
+	logger := logx.New(cfg.LogLevel, os.Stderr, false)
+	slog.SetDefault(logger)
+	a, cleanup, err := app.Build(ctx, cfg, tier, store.IFaceCLI, logger)
 	if err != nil {
 		return err
 	}
@@ -67,8 +70,8 @@ func run(ctx context.Context, tierFlag string, args []string, stdout io.Writer) 
 // decision source so cost behavior is visible while working. in/out are
 // injected so tests can drive the loop without the process terminal.
 func repl(ctx context.Context, eng *engine.Engine, in io.Reader, out io.Writer) error {
-	fmt.Fprintln(out, "aegis-agent interactive mode — empty line or Ctrl-D to exit")
-	fmt.Fprintln(out, "router commands: /uptime /disk /memory /hostname /kernel /who /csv_summary <path> /csv_head <path> [n]")
+	fmt.Fprintln(out, "aegis agent interactive mode — empty line or Ctrl-D to exit")
+	fmt.Fprintln(out, "router commands: /uptime /disk /memory /hostname /kernel /who /csv_summary <path> /csv_head <path> [n] /mkdir <path> /ls [path] /download <url> <path> /job <id>")
 	sc := bufio.NewScanner(in)
 	sc.Buffer(make([]byte, 64*1024), 1024*1024)
 	for {
@@ -83,11 +86,7 @@ func repl(ctx context.Context, eng *engine.Engine, in io.Reader, out io.Writer) 
 		}
 		_, rctx := trace.New(ctx, "")
 		res := eng.Run(rctx, prompt)
-		if res.RuleID != "" {
-			fmt.Fprintf(out, "[%s via %s, %dms]\n", res.DecisionSource, res.RuleID, res.LatencyMS)
-		} else {
-			fmt.Fprintf(out, "[%s, %dms]\n", res.DecisionSource, res.LatencyMS)
-		}
+		fmt.Fprintln(out, res.Header(", "))
 		fmt.Fprintln(out, res.Answer)
 		if errors.Is(ctx.Err(), context.Canceled) {
 			return nil

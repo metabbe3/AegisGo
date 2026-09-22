@@ -187,8 +187,8 @@ func TestInboxClosedStoreErrors(t *testing.T) {
 	if err := inbox.MarkStatus(ctx, 1, InboxFailed); err == nil {
 		t.Error("MarkStatus on closed store: want error")
 	}
-	if err := inbox.Unclaim(ctx, 1); err == nil {
-		t.Error("Unclaim on closed store: want error")
+	if err := inbox.FailAndReopen(ctx, 1); err == nil {
+		t.Error("FailAndReopen on closed store: want error")
 	}
 	if err := inbox.AdvanceHighWater(ctx, 1); err == nil {
 		t.Error("AdvanceHighWater on closed store: want error")

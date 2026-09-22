@@ -25,13 +25,21 @@ request ──▶ trace ID ──▶ deterministic router ──match──▶ n
                     AEGIS_LLM=off → fast "disabled" answer (kill switch)
 ```
 
+Between the router and the LLM sits an optional **fast tier**
+(`AEGIS_CLASSIFIER=on`, Dify-style): on a miss, one cheap
+`AEGIS_MODEL_FAST` call tries to pick a native tool (`decision_source=
+llm_classifier`). Declining — freeform, bad JSON, wrong tool — always
+falls through to the smart LLM. Classifier hits are tool-choice-labeled
+corpus, so recurring shapes graduate into regex rules and decay to
+**zero** LLM calls.
+
 ## Quickstart
 
 ```bash
 make build && make test      # no keys or network needed
-AEGIS_LLM=off bin/aegis-agent /uptime        # instant, zero credentials
-AEGIS_LLM=off bin/aegis-agent /csv_head testdata/sample.csv 5
-AEGIS_LLM=off bin/aegis-agent "any question" # kill switch: no LLM configured
+AEGIS_LLM=off bin/aegis agent /uptime        # instant, zero credentials
+AEGIS_LLM=off bin/aegis agent /csv_head testdata/sample.csv 5
+AEGIS_LLM=off bin/aegis agent "any question" # kill switch: no LLM configured
 ```
 
 With a model behind it (free, local — [Ollama]):
@@ -39,8 +47,8 @@ With a model behind it (free, local — [Ollama]):
 ```bash
 export AEGIS_PROVIDER=openai-compat AEGIS_MODEL=qwen2.5:0.5b
 export OPENAI_API_KEY=ollama OPENAI_BASE_URL=http://localhost:11434/v1
-bin/aegis-agent "How many rows in testdata/sample.csv? Use the read_csv tool."
-bin/aegis-agent --tier fast "quick question"   # cheap model tier
+bin/aegis agent "How many rows in testdata/sample.csv? Use the read_csv tool."
+bin/aegis agent --tier fast "quick question"   # cheap model tier
 ```
 
 Or OpenAI / Anthropic / Foundry — see the env table.
@@ -57,10 +65,10 @@ auto-demotes. LLM spend falls as traffic grows, and the guard means falling
 spend can never come from wrong answers.
 
 ```bash
-aegisctl rules mine --threshold 3    # mine now (or let the hourly pass do it)
-aegisctl rules list                  # see shadow/active/demoted
-aegisctl stats                       # deflection rate, top fallback shapes
-aegisctl replay <trace-id>           # audit trail for one run
+aegis ctl rules mine --threshold 3    # mine now (or let the hourly pass do it)
+aegis ctl rules list                  # see shadow/active/demoted
+aegis ctl stats                       # deflection rate, top fallback shapes
+aegis ctl replay <trace-id>           # audit trail for one run
 ```
 
 Demo (live-verified): three LLM answers to "give me stats for file
@@ -70,7 +78,7 @@ the same prompt answers in **0ms with `AEGIS_LLM=off`**.
 ## Serve it (REST + gRPC + SSE for your microservices)
 
 ```bash
-AEGIS_LLM=off AEGIS_ADDR=:8080 bin/aegis-serve &
+AEGIS_LLM=off AEGIS_ADDR=:8080 bin/aegis serve &
 curl -s localhost:8080/healthz                       # liveness
 curl -s localhost:8080/readyz                        # readiness (store reachable)
 curl -s localhost:8080/v1/agent/run -d '{"prompt":"/uptime"}' -H 'X-Trace-Id: t-42'
@@ -100,7 +108,7 @@ The full Telegram interface ships in the binary — **one env var activates it**
 ```bash
 export AEGIS_TELEGRAM_TOKEN=123456:AB…       # from @BotFather
 export AEGIS_TELEGRAM_CHATS=424242            # your numeric chat id (allowlist)
-AEGIS_LLM=off bin/aegis-serve                 # even router-only bots work
+AEGIS_LLM=off bin/aegis serve                 # even router-only bots work
 ```
 
 Transport picks itself: `AEGIS_TELEGRAM_WEBHOOK_URL` set → webhook mode
@@ -128,7 +136,8 @@ self-hosted Bot API).
 ## Router rules (deterministic, editable at runtime)
 
 Shipped: `/uptime /disk /df /memory /free /hostname /kernel /uname /who
-/csv_summary <path> /csv_head <path> [n]`. Rules live in the SQLite
+/csv_summary <path> /csv_head <path> [n] /mkdir <path> /ls [path]
+/download <url> <path> /job <id>`. Rules live in the SQLite
 `rules` table and hot-reload (`AEGIS_RULES_RELOAD`, default 30s):
 
 ```bash
@@ -151,12 +160,14 @@ sqlite3 aegisgo.db "SELECT normalized_prompt, COUNT(*) FROM fallback_events GROU
 | `read_csv` / `csv_stats` / `read_doc` | sandboxed to `AEGIS_WORKSPACE` (symlink-aware), size-capped |
 | `system_command` | fixed-argv catalog (`uptime df free hostname uname who`) — input picks a key, never argv; process-group kill on timeout |
 | `sql_query` | `database/sql`, parameterized only, **read-only by default** (`AEGIS_SQL_MODE=rw` to unlock); `attach_csvs` turns workspace CSVs into queryable temp tables |
+| `make_dir` / `list_dir` | create/list inside the workspace (same sandbox, not-yet-existing paths validated by the ancestor walk) |
+| `download` / `job_status` | background http(s) fetch to the workspace — returns a `job_id` instantly; poll until `done`/`error`. Byte-capped, timeout-bounded, loopback/private hosts refused (`AEGIS_DOWNLOAD_ALLOW_PRIVATE=on` to allow) |
 | + external MCP tools | `AEGIS_MCP_SERVERS="stdio:<cmd> | https://host/mcp"` |
 
 SQL over the sample CSV:
 
 ```bash
-AEGIS_LLM=off bin/aegis-agent /csv_head testdata/sample.csv 1
+AEGIS_LLM=off bin/aegis agent /csv_head testdata/sample.csv 1
 # or via the LLM: "attach testdata/sample.csv as orders and total qty by shipped"
 ```
 
@@ -174,6 +185,8 @@ AEGIS_LLM=off bin/aegis-agent /csv_head testdata/sample.csv 1
 | `AEGIS_DB_PATH` | embedded SQLite file (audit, rules, answers) |
 | `AEGIS_SQL_DSN` / `AEGIS_SQL_MODE` | sql_query backend / `ro`\|`rw` |
 | `AEGIS_RULES_RELOAD` | rules hot-reload seconds (0 = off) |
+| `AEGIS_CLASSIFIER` | `on` = fast-tier classify on router misses: one `AEGIS_MODEL_FAST` call picks a native tool before the smart LLM (`llm_classifier`; hits feed the miner) |
+| `AEGIS_DOWNLOAD_TIMEOUT` / `_MAX_BYTES` / `_ALLOW_PRIVATE` | download bounds: 120s / 64 MiB / off — private hosts need explicit opt-in |
 | `AEGIS_ADDR` / `AEGIS_GRPC_ADDR` | HTTP / gRPC listen addresses (`none` disables gRPC) |
 | `AEGIS_MINER_THRESHOLD` / `_PROMOTE_AFTER` / `_INTERVAL` | self-mining knobs (20 / 5 / 3600s, 0=off) |
 | `AEGIS_TELEGRAM_TOKEN` | enables the Telegram interface (empty = dormant) |
@@ -188,7 +201,7 @@ AEGIS_LLM=off bin/aegis-agent /csv_head testdata/sample.csv 1
   (gRPC, Telegram dual-mode, self-mining router)
 - `WORKFLOW.md` — recipes: add rules/tools/commands/providers, external SQL,
   operate the audit trail, Linux deploy
-- `deploy/aegis-serve.service` — hardened systemd unit template
+- `deploy/aegis.service` — hardened systemd unit template
 - `examples/mcp-echo-server` — the mcp-go server-side pattern
 
 ## Linux Deployment
@@ -197,7 +210,7 @@ AEGIS_LLM=off bin/aegis-agent /csv_head testdata/sample.csv 1
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/ ./cmd/...
 ```
 
-Copy `deploy/aegis-serve.service`, set env in `/etc/aegisgo.env`, done —
+Copy `deploy/aegis.service`, set env in `/etc/aegisgo.env`, done —
 see WORKFLOW.md.
 
 [microsoft/agent-framework-go]: https://github.com/microsoft/agent-framework-go

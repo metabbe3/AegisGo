@@ -14,7 +14,9 @@ import (
 	"time"
 
 	"aegisgo/internal/engine"
+	"aegisgo/internal/logx"
 	"aegisgo/internal/store"
+	"aegisgo/internal/task"
 	"aegisgo/internal/trace"
 )
 
@@ -47,15 +49,19 @@ type Readiness interface {
 
 // Deps bundles the handler dependencies.
 type Deps struct {
-	Engine   Engine
-	Answers  AnswerStore
-	Readines Readiness // optional; nil skips the deep check
-	Stats    StatsSource
+	Engine    Engine
+	Answers   AnswerStore
+	Readiness Readiness // optional; nil skips the deep check
+	Stats     StatsSource
 	// Webhook, when non-nil, is mounted at POST /telegram/webhook (the
 	// handler itself is built by internal/telegram; the server stays
 	// transport-agnostic).
 	Webhook http.Handler
-	Logger  *slog.Logger
+	// Tasks tracks async-run goroutines so shutdown can join them (BC5).
+	// nil is fine for tests and embedders that never wait: Handler fills in
+	// a throwaway group.
+	Tasks  *task.Group
+	Logger *slog.Logger
 }
 
 // Handler builds the HTTP routes.
@@ -68,8 +74,9 @@ type Deps struct {
 //	POST /v1/agent/run?async=1 enqueue; returns 202 + trace_id
 //	GET  /v1/answers/{trace}   poll an async answer
 func Handler(d Deps) http.Handler {
-	if d.Logger == nil {
-		d.Logger = slog.Default()
+	d.Logger = logx.Or(d.Logger)
+	if d.Tasks == nil {
+		d.Tasks = &task.Group{}
 	}
 	mux := http.NewServeMux()
 
@@ -78,10 +85,10 @@ func Handler(d Deps) http.Handler {
 	})
 
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
-		if d.Readines != nil {
+		if d.Readiness != nil {
 			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 			defer cancel()
-			if err := d.Readines.Ping(ctx); err != nil {
+			if err := d.Readiness.Ping(ctx); err != nil {
 				writeError(w, http.StatusServiceUnavailable, "store unreachable: "+err.Error())
 				return
 			}
@@ -138,14 +145,25 @@ type runResponse struct {
 	LatencyMS      int64  `json:"latency_ms"`
 }
 
-func runAgent(w http.ResponseWriter, r *http.Request, d Deps) {
+// decodeRunRequest parses and validates the run body shared by the sync and
+// stream handlers: a 1 MiB cap and the same two 400s. false means the
+// response is already written.
+func decodeRunRequest(w http.ResponseWriter, r *http.Request) (runRequest, bool) {
 	var req runRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
-		return
+		return req, false
 	}
 	if strings.TrimSpace(req.Prompt) == "" {
 		writeError(w, http.StatusBadRequest, "prompt is required")
+		return req, false
+	}
+	return req, true
+}
+
+func runAgent(w http.ResponseWriter, r *http.Request, d Deps) {
+	req, ok := decodeRunRequest(w, r)
+	if !ok {
 		return
 	}
 
@@ -157,16 +175,16 @@ func runAgent(w http.ResponseWriter, r *http.Request, d Deps) {
 			writeError(w, http.StatusInternalServerError, "queueing answer: "+err.Error())
 			return
 		}
-		go func(ctx context.Context) {
+		// Same 5-minute bound as the sync path: a stuck provider call must
+		// not park a pending answer forever. Completion persists on a fresh
+		// context so it survives even a timed-out run.
+		d.Tasks.Go(r.Context(), 5*time.Minute, func(ctx context.Context) {
 			res := d.Engine.Run(ctx, req.Prompt)
-			status := store.AnswerDone
-			if res.DecisionSource == store.SourceError {
-				status = store.AnswerError
-			}
+			status := store.AnswerStatusFor(res.DecisionSource)
 			if err := d.Answers.CompleteAnswer(context.Background(), traceID, status, res.Answer); err != nil {
 				d.Logger.Error("completing answer", "trace_id", traceID, "error", err)
 			}
-		}(context.WithoutCancel(r.Context())) // outlive the request, keep trace values
+		}) // detached: outlives the request, keeps trace values
 		writeJSON(w, http.StatusAccepted, map[string]string{"trace_id": traceID, "status": store.AnswerPending})
 		return
 	}
@@ -194,13 +212,8 @@ func runAgent(w http.ResponseWriter, r *http.Request, d Deps) {
 // Both router hits (deterministic, chunked) and LLM runs (provider deltas)
 // use the same wire shape.
 func runAgentStream(w http.ResponseWriter, r *http.Request, d Deps) {
-	var req runRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
-		return
-	}
-	if strings.TrimSpace(req.Prompt) == "" {
-		writeError(w, http.StatusBadRequest, "prompt is required")
+	req, ok := decodeRunRequest(w, r)
+	if !ok {
 		return
 	}
 	fl, ok := w.(http.Flusher)

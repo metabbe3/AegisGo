@@ -118,6 +118,40 @@ func TestAnswerLifecycle(t *testing.T) {
 	}
 }
 
+// TestDeleteExpiredAnswers pins the background sweep (BC6): rows past their
+// TTL go even when nobody ever polls them; live rows stay. Without the
+// sweep, abandoned traces (202 acked, answer completed, caller gone) sit in
+// the table forever — lazy delete-on-read only fires on traffic.
+func TestDeleteExpiredAnswers(t *testing.T) {
+	s, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+
+	for _, id := range []string{"gone", "live"} {
+		if err := s.PutAnswer(ctx, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.execSync(ctx, `UPDATE answers SET expires_ts=? WHERE trace_id='gone'`,
+		time.Now().UTC().Add(-time.Second).Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.DeleteExpiredAnswers(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok, err := s.GetAnswer(ctx, "gone"); ok || err != nil {
+		t.Errorf("expired row survived the sweep: ok=%v err=%v", ok, err)
+	}
+	if _, ok, err := s.GetAnswer(ctx, "live"); !ok || err != nil {
+		t.Errorf("live row swept: ok=%v err=%v", ok, err)
+	}
+}
+
 func TestNormalizePrompt(t *testing.T) {
 	cases := map[string]string{
 		"summarize data/2024.csv":  "summarize <path>",

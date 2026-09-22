@@ -68,7 +68,7 @@ func TestHealthzAndReadyz(t *testing.T) {
 	}
 	defer st.Close()
 
-	srv := httptest.NewServer(Handler(Deps{Engine: &fakeEngine{}, Answers: st, Readines: st}))
+	srv := httptest.NewServer(Handler(Deps{Engine: &fakeEngine{}, Answers: st, Readiness: st}))
 	defer srv.Close()
 
 	for path := range map[string]int{"/healthz": 200, "/readyz": 200} {
@@ -796,7 +796,7 @@ func TestReadinessStoreDown(t *testing.T) {
 	}
 	st.Close()
 
-	srv := httptest.NewServer(Handler(Deps{Engine: &fakeEngine{}, Answers: nopAnswers{}, Readines: st}))
+	srv := httptest.NewServer(Handler(Deps{Engine: &fakeEngine{}, Answers: nopAnswers{}, Readiness: st}))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/readyz")

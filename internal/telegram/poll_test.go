@@ -91,18 +91,33 @@ func TestPollLoopHighWaterReadError(t *testing.T) {
 	p := NewPollLoop(&fakeClient{}, inbox, pool, slog.New(h))
 
 	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		p.Run(ctx)
-		close(done)
-	}()
+	go p.Run(ctx)
 
 	waitFor(t, 5*time.Second, func() bool { return h.saw("telegram: reading high water") })
 	cancel()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
+	if !p.Wait(5 * time.Second) {
 		t.Fatal("Run did not return after cancel")
+	}
+}
+
+// TestPollLoopWaitJoinsShutdown pins BC9: after ctx cancel, Wait reports
+// the transport goroutine actually returned — shutdown joins it instead of
+// leaking an in-flight getUpdates past the store close.
+func TestPollLoopWaitJoinsShutdown(t *testing.T) {
+	inbox, _ := openInbox(t)
+	pool := NewWorkerPool(inbox, 1, time.Hour, func(context.Context, InboxRow) {}, nil)
+	p := NewPollLoop(&fakeClient{}, inbox, pool, nil)
+
+	// Before Run returns there is no join to have: the bound elapses.
+	if p.Wait(10 * time.Millisecond) {
+		t.Fatal("Wait = true before Run returned")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go p.Run(ctx)
+	cancel()
+	if !p.Wait(5 * time.Second) {
+		t.Fatal("Wait = false after cancel — transport goroutine leaked")
 	}
 }
 

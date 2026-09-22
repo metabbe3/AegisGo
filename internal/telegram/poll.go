@@ -4,6 +4,9 @@ import (
 	"context"
 	"log/slog"
 	"time"
+
+	"aegisgo/internal/logx"
+	"aegisgo/internal/task"
 )
 
 // Poll defaults.
@@ -24,19 +27,28 @@ type PollLoop struct {
 	inbox  *Inbox
 	pool   *WorkerPool
 	logger *slog.Logger
+	// done is closed when Run returns, so shutdown can join the transport
+	// goroutine instead of leaking it past the store close.
+	done chan struct{}
 }
 
 // NewPollLoop builds the poll transport.
 func NewPollLoop(c Client, inbox *Inbox, pool *WorkerPool, logger *slog.Logger) *PollLoop {
-	if logger == nil {
-		logger = slog.Default()
-	}
-	return &PollLoop{client: c, inbox: inbox, pool: pool, logger: logger}
+	logger = logx.Or(logger)
+	return &PollLoop{client: c, inbox: inbox, pool: pool, logger: logger,
+		done: make(chan struct{})}
+}
+
+// Wait blocks until Run has returned or d elapses; it reports whether the
+// transport goroutine joined. Call after cancelling Run's context.
+func (p *PollLoop) Wait(d time.Duration) bool {
+	return task.WaitFor(p.done, d)
 }
 
 // Run blocks until ctx is cancelled. It is the transport's only goroutine;
 // workers live in the shared pool.
 func (p *PollLoop) Run(ctx context.Context) {
+	defer close(p.done)
 	backoff := pollMinBack
 	p.logger.Info("telegram: long-poll transport started (no public ingress required)")
 	for {
@@ -80,8 +92,12 @@ func (p *PollLoop) Run(ctx context.Context) {
 
 		// Advance the ack cursor only past fully processed work. Rows not
 		// yet done stay below the cursor and get refetched after a crash.
-		if err := p.advance(ctx, updates); err != nil {
-			p.logger.Error("telegram: advancing high water", "error", err)
+		// An empty batch can never ack anything, so skip the Pending scan
+		// idle polls would otherwise run every cycle.
+		if len(updates) > 0 {
+			if err := p.advance(ctx, updates); err != nil {
+				p.logger.Error("telegram: advancing high water", "error", err)
+			}
 		}
 	}
 }

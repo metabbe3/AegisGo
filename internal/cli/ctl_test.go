@@ -1,8 +1,8 @@
-// Tests for the aegisctl admin command. run() writes to injected stdout and
+// Tests for the aegis ctl subcommand. runCtl writes to injected stdout and
 // reads the store at AEGIS_DB_PATH, so each test seeds a temp database
 // through the store API (fire-and-forget writes + Flush, exactly like the
 // engine's request path) and then points the command at it.
-package main
+package cli
 
 import (
 	"bytes"
@@ -92,18 +92,18 @@ func errMustContain(t *testing.T, err error, want string) {
 	}
 }
 
-func TestUsageNoArgs(t *testing.T) {
+func TestCtlUsageNoArgs(t *testing.T) {
 	withDB(t, nil)
 	var buf bytes.Buffer
-	err := run(nil, &buf)
-	errMustContain(t, err, "usage: aegisctl rules list")
+	err := runCtl(nil, &buf)
+	errMustContain(t, err, "usage: aegis ctl rules list")
 }
 
-func TestUsageUnknownCommand(t *testing.T) {
+func TestCtlUsageUnknownCommand(t *testing.T) {
 	withDB(t, nil)
 	var buf bytes.Buffer
-	err := run([]string{"frobnicate"}, &buf)
-	errMustContain(t, err, "usage: aegisctl rules")
+	err := runCtl([]string{"frobnicate"}, &buf)
+	errMustContain(t, err, "usage: aegis ctl rules")
 }
 
 // TestRulesListSeeded: the table renders a header plus one aligned row per
@@ -114,7 +114,7 @@ func TestRulesListSeeded(t *testing.T) {
 		seedRule(ctx, st, "mined_1", `summarize\s+(\S+)`, "read_csv", "mined")
 	})
 	var buf bytes.Buffer
-	if err := run([]string{"rules", "list"}, &buf); err != nil {
+	if err := runCtl([]string{"rules", "list"}, &buf); err != nil {
 		t.Fatalf("rules list: %v", err)
 	}
 	out := buf.String()
@@ -135,7 +135,7 @@ func TestRulesListSeeded(t *testing.T) {
 func TestRulesMineNone(t *testing.T) {
 	withDB(t, nil)
 	var buf bytes.Buffer
-	if err := run([]string{"rules", "mine", "--threshold", "2"}, &buf); err != nil {
+	if err := runCtl([]string{"rules", "mine", "--threshold", "2"}, &buf); err != nil {
 		t.Fatalf("rules mine: %v", err)
 	}
 	if want := "no eligible clusters"; !strings.Contains(buf.String(), want) {
@@ -158,7 +158,7 @@ func TestRulesMineProposes(t *testing.T) {
 		}
 	})
 	var buf bytes.Buffer
-	if err := run([]string{"rules", "mine", "--threshold", "2"}, &buf); err != nil {
+	if err := runCtl([]string{"rules", "mine", "--threshold", "2"}, &buf); err != nil {
 		t.Fatalf("rules mine: %v", err)
 	}
 	out := buf.String()
@@ -176,7 +176,7 @@ func TestRulesMineProposes(t *testing.T) {
 func TestRulesMineBadFlag(t *testing.T) {
 	withDB(t, nil)
 	var buf bytes.Buffer
-	err := run([]string{"rules", "mine", "--bogus"}, &buf)
+	err := runCtl([]string{"rules", "mine", "--bogus"}, &buf)
 	errMustContain(t, err, "bogus")
 }
 
@@ -188,13 +188,13 @@ func TestRulesPromoteDemoteRoundTrip(t *testing.T) {
 	})
 
 	var buf bytes.Buffer
-	if err := run([]string{"rules", "demote", "mined_1"}, &buf); err != nil {
+	if err := runCtl([]string{"rules", "demote", "mined_1"}, &buf); err != nil {
 		t.Fatalf("rules demote: %v", err)
 	}
 	if state, enabled := ruleRow(t, dbPath, "mined_1"); state != "demoted" || enabled {
 		t.Errorf("after demote: state=%q enabled=%v, want demoted/false", state, enabled)
 	}
-	if err := run([]string{"rules", "promote", "mined_1"}, &buf); err != nil {
+	if err := runCtl([]string{"rules", "promote", "mined_1"}, &buf); err != nil {
 		t.Fatalf("rules promote: %v", err)
 	}
 	if state, enabled := ruleRow(t, dbPath, "mined_1"); state != "active" || !enabled {
@@ -207,18 +207,18 @@ func TestRulesPromoteDemoteRoundTrip(t *testing.T) {
 		{"rules", "promote"},
 		{"rules", "demote"},
 	} {
-		err := run(args, &buf)
-		if err == nil || !strings.Contains(err.Error(), "usage: aegisctl rules") {
-			t.Errorf("run(%v) error = %v, want a rules usage error", args, err)
+		err := runCtl(args, &buf)
+		if err == nil || !strings.Contains(err.Error(), "usage: aegis ctl rules") {
+			t.Errorf("runCtl(%v) error = %v, want a rules usage error", args, err)
 		}
 	}
-	errMustContain(t, run([]string{"rules", "nope"}, &buf), `unknown rules subcommand "nope"`)
+	errMustContain(t, runCtl([]string{"rules", "nope"}, &buf), `unknown rules subcommand "nope"`)
 }
 
 func TestStatsJSON(t *testing.T) {
 	withDB(t, nil)
 	var buf bytes.Buffer
-	if err := run([]string{"stats"}, &buf); err != nil {
+	if err := runCtl([]string{"stats"}, &buf); err != nil {
 		t.Fatalf("stats: %v", err)
 	}
 	if !json.Valid(buf.Bytes()) {
@@ -240,7 +240,7 @@ func TestReplayKnownTrace(t *testing.T) {
 		})
 	})
 	var buf bytes.Buffer
-	if err := run([]string{"replay", "trace-known"}, &buf); err != nil {
+	if err := runCtl([]string{"replay", "trace-known"}, &buf); err != nil {
 		t.Fatalf("replay: %v", err)
 	}
 	out := buf.String()
@@ -256,7 +256,7 @@ func TestReplayKnownTrace(t *testing.T) {
 func TestReplayUnknown(t *testing.T) {
 	withDB(t, nil)
 	var buf bytes.Buffer
-	err := run([]string{"replay", "no-such-trace"}, &buf)
+	err := runCtl([]string{"replay", "no-such-trace"}, &buf)
 	errMustContain(t, err, "no audit rows for trace no-such-trace")
 }
 
@@ -264,7 +264,7 @@ func TestReplayArgCount(t *testing.T) {
 	withDB(t, nil)
 	var buf bytes.Buffer
 	for _, args := range [][]string{{"replay"}, {"replay", "a", "b"}} {
-		err := run(args, &buf)
-		errMustContain(t, err, "usage: aegisctl replay <trace-id>")
+		err := runCtl(args, &buf)
+		errMustContain(t, err, "usage: aegis ctl replay <trace-id>")
 	}
 }

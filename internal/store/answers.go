@@ -18,6 +18,18 @@ const (
 // AnswerTTL is how long a completed answer stays pollable.
 const AnswerTTL = 15 * time.Minute
 
+// AnswerStatusFor maps a run's decision_source to the status its parked
+// async answer completes with: only decision_source=error parks a failure
+// marker — every other source (router, classifier, plain LLM, llm_disabled)
+// produced a usable answer. One spelling of the mapping shared by the REST
+// and gRPC async paths.
+func AnswerStatusFor(decisionSource string) string {
+	if decisionSource == SourceError {
+		return AnswerError
+	}
+	return AnswerDone
+}
+
 // Answer is one async result, keyed by trace_id.
 type Answer struct {
 	TraceID string `json:"trace_id"`
@@ -43,10 +55,19 @@ func (s *Store) CompleteAnswer(ctx context.Context, traceID, status, output stri
 	)
 }
 
+// DeleteExpiredAnswers removes answer rows past their TTL. GetAnswer
+// already deletes lazily on read; this background sweep (serve wires it to
+// a 5-minute loop) clears rows nobody ever polls, so the table stays
+// bounded without traffic.
+func (s *Store) DeleteExpiredAnswers(ctx context.Context) error {
+	return s.execSync(ctx,
+		`DELETE FROM answers WHERE expires_ts < ?`, time.Now().UTC().Format(time.RFC3339Nano))
+}
+
 // GetAnswer returns the answer for a trace; expired rows read as absent and
 // are lazily deleted.
 func (s *Store) GetAnswer(ctx context.Context, traceID string) (Answer, bool, error) {
-	row := s.db.QueryRowContext(ctx,
+	row := s.QueryRow(ctx,
 		`SELECT status, output, expires_ts FROM answers WHERE trace_id=?`, traceID)
 	var status, output, expires string
 	if err := row.Scan(&status, &output, &expires); err != nil {

@@ -13,7 +13,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	_ "modernc.org/sqlite" // registers the "sqlite" driver (pure Go, no CGo)
@@ -32,8 +32,9 @@ type Store struct {
 	writes chan writeOp
 	quit   chan struct{}
 	done   chan struct{}
-	mu     sync.RWMutex // guards closed
-	closed bool
+	// closed is an atomic so enqueue — the audit hot path — reads it
+	// lock-free; only Close flips it (once, via CompareAndSwap).
+	closed atomic.Bool
 }
 
 type writeOp struct {
@@ -81,14 +82,9 @@ func Open(path string) (*Store, error) {
 
 // Close stops the batcher (draining queued writes) and closes the database.
 func (s *Store) Close() error {
-	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		return nil
+	if !s.closed.CompareAndSwap(false, true) {
+		return nil // already closed
 	}
-	s.closed = true
-	s.mu.Unlock()
-
 	close(s.quit)
 	<-s.done // batcher drains what it can, then exits
 	return s.db.Close()
@@ -97,10 +93,7 @@ func (s *Store) Close() error {
 // enqueue queues a write for the batcher. Fails fast if the queue is full or
 // the store is closing — never blocks the caller.
 func (s *Store) enqueue(query string, args []any, done chan error) error {
-	s.mu.RLock()
-	closed := s.closed
-	s.mu.RUnlock()
-	if closed {
+	if s.closed.Load() {
 		return fmt.Errorf("store closed")
 	}
 	select {
@@ -213,6 +206,30 @@ func (s *Store) Query(ctx context.Context, query string, args ...any) (*sql.Rows
 // QueryRow runs a single-row SELECT against the read pool.
 func (s *Store) QueryRow(ctx context.Context, query string, args ...any) *sql.Row {
 	return s.db.QueryRowContext(ctx, query, args...)
+}
+
+// QueryAll runs a SELECT and scans every row through fn into a slice — the
+// loop shape (Query → defer Close → scan → rows.Err) every read-side caller
+// shared. fn's error aborts the walk; rows.Err() is always surfaced, so an
+// iteration failure can't silently truncate a result (that strictness fixed
+// three stats loops that used to skip it). Deliberately NOT used by
+// internal/router's rules loading: the router must stay import-free of this
+// package.
+func QueryAll[T any](ctx context.Context, s *Store, query string, scan func(*sql.Rows) (T, error), args ...any) ([]T, error) {
+	rows, err := s.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []T
+	for rows.Next() {
+		v, err := scan(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
 }
 
 // Ping verifies the database is reachable (readiness probe).
@@ -339,8 +356,6 @@ func (s *Store) migrateV1() error {
 	return tx.Commit()
 }
 
-// migrateV2 adds the Telegram interface substrate: the durable inbox
-// (idempotent on update_id — the at-least-once delivery anchor) and a small
 // kv table for transport state like the long-poll high-water mark.
 func (s *Store) migrateV2() error {
 	tx, err := s.db.Begin()

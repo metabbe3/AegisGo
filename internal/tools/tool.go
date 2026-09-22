@@ -27,6 +27,26 @@ type Tool interface {
 	FuncTool() tool.FuncTool
 }
 
+// optInt returns *p when set and non-negative, else def — the ≥0 flavor:
+// an explicit 0 is honored (read_csv max_rows=0, list_dir max_entries=0).
+func optInt(p *int, def int) int {
+	if p != nil && *p >= 0 {
+		return *p
+	}
+	return def
+}
+
+// optPos returns *p when set and strictly positive, else def — the >0
+// flavor: 0 means "unset" (read_doc treats max_bytes=0 and offset=0 as
+// defaults). Two helpers, not one, because the 0-handling difference is
+// real behavior, not noise.
+func optPos(p *int, def int) int {
+	if p != nil && *p > 0 {
+		return *p
+	}
+	return def
+}
+
 // Config names and describes a tool for both entry points.
 type Config struct {
 	Name        string

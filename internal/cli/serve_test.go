@@ -1,10 +1,10 @@
-// Tests for the aegis-serve command shell. serve() is driven in-process
-// (no signature change was needed — its knobs are all environment), so each
+// Tests for the aegis serve subcommand. serve() is driven in-process (no
+// signature change was needed — its knobs are all environment), so each
 // test boots the real offline pipeline and steers it with AEGIS_ADDR /
-// AEGIS_GRPC_ADDR. Listeners bind loopback only; ":99999" fails instantly in
-// net.Listen (port out of range) which keeps the listen-error tests
+// AEGIS_GRPC_ADDR. Listeners bind loopback only; ":99999" fails instantly
+// in net.Listen (port out of range) which keeps the listen-error tests
 // deterministic — no DNS, no dependence on privileged-port rules.
-package main
+package cli
 
 import (
 	"context"
@@ -15,13 +15,13 @@ import (
 	"time"
 )
 
-// baseEnv applies the offline baseline: LLM kill switch on, temp store and
-// workspace, background loops off, no telegram, no MCP, gRPC disabled (the
-// default ":8081" would bind a real shared port). config.Load treats "" like
-// unset, so blanking keeps tests hermetic against the developer's shell.
-// Every serve test must still set AEGIS_ADDR explicitly — the ":8080"
-// default is never wanted in a test.
-func baseEnv(t *testing.T) {
+// serveBaseEnv applies the offline baseline: LLM kill switch on, temp store
+// and workspace, background loops off, no telegram, no MCP, gRPC disabled
+// (the default ":8081" would bind a real shared port). config.Load treats
+// "" like unset, so blanking keeps tests hermetic against the developer's
+// shell. Every serve test must still set AEGIS_ADDR explicitly — the
+// ":8080" default is never wanted in a test.
+func serveBaseEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
 		"AEGIS_MCP_SERVERS", "AEGIS_TELEGRAM_TOKEN", "AEGIS_GRPC_ADDR",
@@ -95,7 +95,7 @@ func waitServe(t *testing.T, done <-chan error) {
 }
 
 func TestServeBadTier(t *testing.T) {
-	baseEnv(t)
+	serveBaseEnv(t)
 	t.Setenv("AEGIS_ADDR", "127.0.0.1:0")
 	err := serve(context.Background(), "bogus")
 	if err == nil {
@@ -109,7 +109,7 @@ func TestServeBadTier(t *testing.T) {
 // TestServeListenError: an out-of-range port makes ListenAndServe fail
 // before anything else can go wrong; the error must surface from serve.
 func TestServeListenError(t *testing.T) {
-	baseEnv(t)
+	serveBaseEnv(t)
 	t.Setenv("AEGIS_ADDR", ":99999")
 	err := serve(context.Background(), "smart")
 	if err == nil {
@@ -125,7 +125,7 @@ func TestServeListenError(t *testing.T) {
 // never got a shutdown signal; it stops with the process, as on any boot
 // failure in production).
 func TestServeGRPCListenError(t *testing.T) {
-	baseEnv(t)
+	serveBaseEnv(t)
 	t.Setenv("AEGIS_ADDR", "127.0.0.1:0")
 	t.Setenv("AEGIS_GRPC_ADDR", ":99999")
 	err := serve(context.Background(), "smart")
@@ -140,7 +140,7 @@ func TestServeGRPCListenError(t *testing.T) {
 // TestServeGRPCDisabled: AEGIS_GRPC_ADDR=none boots HTTP only; cancelling
 // the boot context after /healthz is live shuts down cleanly.
 func TestServeGRPCDisabled(t *testing.T) {
-	baseEnv(t)
+	serveBaseEnv(t)
 	addr := freeAddr(t)
 	t.Setenv("AEGIS_ADDR", addr)
 
@@ -154,7 +154,7 @@ func TestServeGRPCDisabled(t *testing.T) {
 // then cancel → HTTP drains via Shutdown, gRPC via GracefulStop, serve
 // returns nil.
 func TestServeGracefulShutdown(t *testing.T) {
-	baseEnv(t)
+	serveBaseEnv(t)
 	addr := freeAddr(t)
 	t.Setenv("AEGIS_ADDR", addr)
 	t.Setenv("AEGIS_GRPC_ADDR", "127.0.0.1:0")

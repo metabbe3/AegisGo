@@ -175,7 +175,7 @@ func TestStartHotReloadDisabled(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Interval 0 (with the nil-logger branch taken too) → immediate no-op stop.
-	stop := StartHotReload(r, st, 0, nil)
+	stop := StartHotReload(context.Background(), r, st, 0, nil)
 	if stop == nil {
 		t.Fatal("nil stop func returned")
 	}
@@ -199,7 +199,7 @@ func TestStartHotReloadSwapsInNewRule(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stop := StartHotReload(r, st, 50*time.Millisecond, nil)
+	stop := StartHotReload(context.Background(), r, st, 50*time.Millisecond, nil)
 	t.Cleanup(stop) // registered after st.Close's cleanup → runs before it
 
 	insertRule(ctx, t, st, "ping", "/ping", "system_command", `{"command":"hostname"}`)
@@ -209,6 +209,26 @@ func TestStartHotReloadSwapsInNewRule(t *testing.T) {
 	d := r.Handle(ctx, "/ping")
 	if !d.Handled || d.RuleID != "ping" || d.Err != nil {
 		t.Fatalf("/ping after hot reload: %+v", d)
+	}
+}
+
+// TestStartHotReloadStopIdempotent pins BC4: stopping a LIVE reload loop
+// twice must not panic. Cleanup closures fire from more than one exit path
+// (t.Cleanup, deferred shutdown, explicit stop), and the old bare
+// close(done) turned the second call into a crash.
+func TestStartHotReloadStopIdempotent(t *testing.T) {
+	st := openRulesStore(t)
+	r, err := New(testRegistry(t), Seeded())
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop := StartHotReload(context.Background(), r, st, 50*time.Millisecond, nil)
+	stop()
+	stop() // must be a no-op, not "close of closed channel"
+
+	// And the router is still intact afterwards.
+	if d := r.Handle(context.Background(), "/uptime"); !d.Handled || d.RuleID != "uptime" || d.Err != nil {
+		t.Errorf("router disturbed by double stop: %+v", d)
 	}
 }
 
@@ -253,7 +273,7 @@ func TestStartHotReloadBadRowKeepsPrevious(t *testing.T) {
 	}
 
 	h := &recHandler{}
-	stop := StartHotReload(r, st, 50*time.Millisecond, slog.New(h))
+	stop := StartHotReload(context.Background(), r, st, 50*time.Millisecond, slog.New(h))
 	t.Cleanup(stop)
 
 	// Corrupt one rule's pattern. Every subsequent load returns a def that
@@ -330,7 +350,7 @@ func TestLoadRulesAndReloadSurfaceStoreErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := &recHandler{}
-	stop := StartHotReload(r, brokenQueryer{}, 50*time.Millisecond, slog.New(h))
+	stop := StartHotReload(context.Background(), r, brokenQueryer{}, 50*time.Millisecond, slog.New(h))
 	t.Cleanup(stop)
 	waitFor(t, func() bool { return h.saw("rules reload failed; keeping previous rules") }, 2*time.Second)
 	if d := r.Handle(ctx, "/uptime"); !d.Handled || d.RuleID != "uptime" || d.Err != nil {

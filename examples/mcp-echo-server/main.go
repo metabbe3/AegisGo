@@ -2,7 +2,7 @@
 // MCP server with mark3labs/mcp-go (stdio transport). Run it from an MCP
 // client (Claude Desktop, another agent, or AegisGo itself):
 //
-//	AEGIS_MCP_SERVERS="stdio:./mcp-echo-server" aegis-agent
+//	AEGIS_MCP_SERVERS="stdio:./mcp-echo-server" aegis agent
 //
 // It doubles as the reference for the server side of MCP: define tools with
 // mcp.NewTool, register handlers with AddTool, serve over stdio.
@@ -13,6 +13,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -83,12 +84,12 @@ func csvHeadHandler(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolRe
 	if len(records) > rows+1 {
 		records = records[:rows+1] // header + N rows
 	}
-	out := ""
+	var b strings.Builder
 	for i, rec := range records {
 		if i > 0 {
-			out += "\n"
+			b.WriteByte('\n')
 		}
-		out += fmt.Sprint(rec)
+		fmt.Fprint(&b, rec)
 	}
-	return mcp.NewToolResultText(out), nil
+	return mcp.NewToolResultText(b.String()), nil
 }

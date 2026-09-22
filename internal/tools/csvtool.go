@@ -54,11 +54,7 @@ func NewReadCSV(workspace string) (Tool, error) {
 		Name:        "read_csv",
 		Description: "Read a CSV file from the workspace. Returns column names, a preview of data rows, and the total row count. Use csv_stats first when you only need shape/type information.",
 	}, func(ctx context.Context, in CSVReadInput) (CSVReadOutput, error) {
-		limit := csvPreview
-		if in.MaxRows != nil && *in.MaxRows >= 0 {
-			limit = *in.MaxRows
-		}
-		return readCSV(workspace, in.Path, limit)
+		return readCSV(workspace, in.Path, optInt(in.MaxRows, csvPreview))
 	})
 }
 
@@ -72,19 +68,28 @@ func NewCSVStats(workspace string) (Tool, error) {
 	})
 }
 
+// openCSVReader opens a validated CSV path and wraps it in the ragged-row
+// reader every CSV scan uses. The returned func closes the file.
+func openCSVReader(path string) (*csv.Reader, func(), error) {
+	f, err := openCSV(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	r := csv.NewReader(f)
+	r.FieldsPerRecord = -1 // tolerate ragged rows; agents should see the data as-is
+	return r, func() { _ = f.Close() }, nil
+}
+
 func readCSV(workspace, name string, limit int) (CSVReadOutput, error) {
 	path, err := resolvePath(workspace, name)
 	if err != nil {
 		return CSVReadOutput{}, err
 	}
-	f, err := openCSV(path)
+	r, close, err := openCSVReader(path)
 	if err != nil {
 		return CSVReadOutput{}, err
 	}
-	defer f.Close()
-
-	r := csv.NewReader(f)
-	r.FieldsPerRecord = -1 // tolerate ragged rows; agents should see the data as-is
+	defer close()
 
 	header, err := r.Read()
 	if err != nil {
@@ -116,14 +121,11 @@ func csvStats(workspace, name string) (CSVStatsOutput, error) {
 	if err != nil {
 		return CSVStatsOutput{}, err
 	}
-	f, err := openCSV(path)
+	r, close, err := openCSVReader(path)
 	if err != nil {
 		return CSVStatsOutput{}, err
 	}
-	defer f.Close()
-
-	r := csv.NewReader(f)
-	r.FieldsPerRecord = -1
+	defer close()
 
 	header, err := r.Read()
 	if err != nil {
@@ -180,14 +182,12 @@ func csvStats(workspace, name string) (CSVStatsOutput, error) {
 // readAllCSV reads every record of a workspace CSV (bounded by maxRows),
 // returning records and headers. Used by the SQL tool's attach_csv.
 func readAllCSV(path string, maxRows int) ([][]string, []string, error) {
-	f, err := openCSV(path)
+	r, close, err := openCSVReader(path)
 	if err != nil {
 		return nil, nil, err
 	}
-	defer f.Close()
+	defer close()
 
-	r := csv.NewReader(f)
-	r.FieldsPerRecord = -1
 	headers, err := r.Read()
 	if err != nil {
 		return nil, nil, fmt.Errorf("reading header: %w", err)
@@ -206,14 +206,18 @@ func readAllCSV(path string, maxRows int) ([][]string, []string, error) {
 	return records, headers, nil
 }
 
-// looksLikeDate recognizes the handful of date layouts that realistically
-// appear in CSV exports. Good enough for a kind hint; not a validator.
+// dateLayouts are the handful of date shapes that realistically appear in
+// CSV exports. Package-level: looksLikeDate runs per non-empty cell of every
+// stats scan, and a fresh slice there is pure hot-path garbage.
+var dateLayouts = [...]string{
+	time.RFC3339, "2006-01-02", "2006/01/02", "2006-01-02 15:04:05",
+	"02/01/2006", "20060102",
+}
+
+// looksLikeDate recognizes the export date layouts. Good enough for a kind
+// hint; not a validator.
 func looksLikeDate(v string) bool {
-	layouts := []string{
-		time.RFC3339, "2006-01-02", "2006/01/02", "2006-01-02 15:04:05",
-		"02/01/2006", "20060102",
-	}
-	for _, l := range layouts {
+	for _, l := range dateLayouts {
 		if _, err := time.Parse(l, v); err == nil {
 			return true
 		}

@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"aegisgo/internal/logx"
 )
 
 // Inbox statuses.
@@ -125,12 +127,15 @@ func (i *Inbox) MarkStatus(ctx context.Context, updateID int64, status string) e
 		status, time.Now().UTC().Format(time.RFC3339Nano), updateID)
 }
 
-// Unclaim clears a claim whose send failed deterministically, letting a
-// redelivery retry. Never called for crash windows — there the durable
-// claim is exactly what prevents duplicate replies.
-func (i *Inbox) Unclaim(ctx context.Context, updateID int64) error {
+// FailAndReopen marks a claimed row failed and clears its claim in one
+// write, so a redelivery can retry — claim-then-send's rollback for
+// deterministic send failures (API error, rate limit). Never called for
+// crash windows: there the durable claim is exactly what prevents
+// duplicate replies.
+func (i *Inbox) FailAndReopen(ctx context.Context, updateID int64) error {
 	return i.store.Exec(ctx,
-		`UPDATE telegram_inbox SET replied_at=NULL WHERE update_id=?`, updateID)
+		`UPDATE telegram_inbox SET status=?, processed_ts=?, replied_at=NULL WHERE update_id=?`,
+		InboxFailed, time.Now().UTC().Format(time.RFC3339Nano), updateID)
 }
 
 // HighWater returns the last update_id the poll transport may acknowledge
@@ -175,9 +180,7 @@ type WorkerPool struct {
 // also wake immediately on Enqueue via Wake).
 func NewWorkerPool(inbox *Inbox, workers int, interval time.Duration,
 	process func(ctx context.Context, row InboxRow), logger *slog.Logger) *WorkerPool {
-	if logger == nil {
-		logger = slog.Default()
-	}
+	logger = logx.Or(logger)
 	return &WorkerPool{
 		inbox: inbox, process: process, workers: workers,
 		interval: interval, logger: logger, wake: make(chan struct{}, 1),

@@ -11,9 +11,10 @@ import (
 	"log/slog"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
+	"aegisgo/internal/logx"
+	"aegisgo/internal/loop"
 	"aegisgo/internal/router"
 	"aegisgo/internal/store"
 )
@@ -31,6 +32,11 @@ var derivableTools = map[string]bool{
 // dominance is the fraction of a cluster's runs that must agree on one tool
 // before a rule is proposed.
 const dominance = 0.85
+
+// minedArgsTemplate is the args template every mined rule uses: the only
+// derivable tools take exactly one workspace path, spliced from the single
+// pattern capture.
+const minedArgsTemplate = `{"path":"$1"}`
 
 // Proposal is one candidate rule the miner produced.
 type Proposal struct {
@@ -52,44 +58,23 @@ type Options struct {
 // clusters. It never touches seeded rules and never inserts duplicates
 // (same pattern => skip).
 func Mine(ctx context.Context, st *store.Store, opts Options, logger *slog.Logger) ([]Proposal, error) {
-	if logger == nil {
-		logger = slog.Default()
-	}
+	logger = logx.Or(logger)
 	if opts.Threshold <= 0 {
 		opts.Threshold = 20
 	}
 
-	clusters, err := st.Query(ctx,
-		`SELECT normalized_prompt, COUNT(*) c FROM fallback_events
-		 GROUP BY normalized_prompt HAVING c >= ? ORDER BY c DESC`, opts.Threshold)
+	eligible, err := st.FallbackShapes(ctx, opts.Threshold, 0)
 	if err != nil {
-		return nil, err
-	}
-	defer clusters.Close()
-
-	type cluster struct {
-		shape string
-		count int
-	}
-	var eligible []cluster
-	for clusters.Next() {
-		var c cluster
-		if err := clusters.Scan(&c.shape, &c.count); err != nil {
-			return nil, err
-		}
-		eligible = append(eligible, c)
-	}
-	if err := clusters.Err(); err != nil {
 		return nil, err
 	}
 
 	var proposals []Proposal
 	for _, c := range eligible {
-		tool, ok := dominantTool(ctx, st, c.shape, c.count)
+		tool, ok := dominantTool(ctx, st, c.Shape, c.Count)
 		if !ok {
 			continue
 		}
-		pattern, ok := synthesizePattern(c.shape)
+		pattern, ok := synthesizePattern(c.Shape)
 		if !ok {
 			continue
 		}
@@ -112,15 +97,15 @@ func Mine(ctx context.Context, st *store.Store, opts Options, logger *slog.Logge
 		if err := st.Exec(ctx,
 			`INSERT INTO rules (name, pattern, tool, args_template, origin, enabled, created_ts, state)
 			 VALUES (?,?,?,?,?,1,?,?)`,
-			name, pattern, tool, `{"path":"$1"}`, "mined",
+			name, pattern, tool, minedArgsTemplate, "mined",
 			time.Now().UTC().Format(time.RFC3339Nano), router.RuleShadow); err != nil {
 			return nil, err
 		}
 		p := Proposal{Name: name, Pattern: pattern, Tool: tool,
-			ArgsTemplate: `{"path":"$1"}`, ClusterSize: c.count}
+			ArgsTemplate: minedArgsTemplate, ClusterSize: c.Count}
 		proposals = append(proposals, p)
 		logger.Info("mined shadow rule", "name", name, "tool", tool,
-			"cluster", c.count, "pattern", pattern)
+			"cluster", c.Count, "pattern", pattern)
 	}
 	return proposals, nil
 }
@@ -187,43 +172,17 @@ func synthesizePattern(shape string) (string, bool) {
 	return strings.Join(parts, `\s+`), true
 }
 
-// Start runs Mine periodically (interval <= 0 disables). The returned stop
-// function ends the loop and is idempotent — cleanup closures fire from
-// more than one exit path, and a bare close(done) would panic on the second
-// call (same contract as store.Close). The loop also exits when ctx is
-// canceled, so a canceled boot context leaves no goroutine mining against
-// a store the caller is about to close. Shadow evaluation and hot reload
-// pick new rules up on their own cadences — mining never touches the live
-// router.
+// Start runs Mine periodically (interval <= 0 disables; the per-pass
+// timeout is one minute, deliberately independent of ctx — see
+// loop.Periodic). The loop exits on stop or ctx cancel, so a canceled boot
+// context leaves no goroutine mining against a store the caller is about
+// to close. Shadow evaluation and hot reload pick new rules up on their
+// own cadences — mining never touches the live router.
 func Start(ctx context.Context, st *store.Store, opts Options, interval time.Duration, logger *slog.Logger) (stop func()) {
-	if interval <= 0 {
-		return func() {}
-	}
-	if logger == nil {
-		logger = slog.Default()
-	}
-	done := make(chan struct{})
-	var stopOnce sync.Once
-	go func() {
-		t := time.NewTicker(interval)
-		defer t.Stop()
-		for {
-			select {
-			case <-t.C:
-				// Per-tick timeout is deliberately independent of ctx: the
-				// boot ctx outlives many ticks, but one slow pass must never
-				// outlive its own minute.
-				mctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-				if _, err := Mine(mctx, st, opts, logger); err != nil {
-					logger.Error("mining pass failed", "error", err)
-				}
-				cancel()
-			case <-ctx.Done():
-				return
-			case <-done:
-				return
-			}
+	logger = logx.Or(logger)
+	return loop.Periodic(ctx, interval, time.Minute, func(mctx context.Context) {
+		if _, err := Mine(mctx, st, opts, logger); err != nil {
+			logger.Error("mining pass failed", "error", err)
 		}
-	}()
-	return func() { stopOnce.Do(func() { close(done) }) }
+	})
 }

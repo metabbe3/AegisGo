@@ -3,7 +3,7 @@
 # binaries (make build), on loopback only. Each stage proves one slice of
 # the product with the interfaces a user would actually touch: CLI router,
 # workspace file tools + hot-reloaded rules, REST matrix, gRPC, MCP attach,
-# Telegram (against a python3 fake Bot API), aegisctl admin ops, the miner,
+# Telegram (against a python3 fake Bot API), aegis ctl admin ops, the miner,
 # the audit trail, and (when a local Ollama model exists) real LLM fallback
 # with a live tool call.
 #
@@ -12,7 +12,7 @@
 # Rules of the road:
 #   - every wait is a bounded poll (wait_for); no bare sleeps
 #   - each stage prints `PASS/FAIL <id>`; a summary table ends the run
-#   - fixed ports 18080-18083 + 18090, guarded up front (a busy port means
+#   - fixed ports 18080-18084 + 18090, guarded up front (a busy port means
 #     a previous run is still alive — that's an error, not a race to win)
 #   - everything the script starts (serves, fake Bot API, an `ollama serve`
 #     it started itself) is killed by the EXIT trap
@@ -27,10 +27,11 @@ set -euo pipefail
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 
 # ---- fixed ports ------------------------------------------------------------
-P_HTTP=18080   # aegis-serve HTTP: S2 workspace serve, then the S3/S4/S5 serve
-P_GRPC=18081   # aegis-serve gRPC (S5, same process as P_HTTP)
+P_HTTP=18080   # aegis serve HTTP: S2 workspace serve, then the S3/S4/S5 serve
+P_GRPC=18081   # aegis serve gRPC (S5, same process as P_HTTP)
 P_AUX=18082    # S6 MCP-attach serve, reused by the S7 poll-mode serve
 P_S7WEB=18083  # S7 webhook-mode serve (webhook endpoint mounts here)
+P_FILE=18084   # S5F python3 http.server (real download source)
 P_TG=18090     # python3 fake Telegram Bot API (S7)
 
 # ---- per-run workspace ------------------------------------------------------
@@ -42,7 +43,7 @@ mkdir -p "$WS/data" "$WS/logs" "$DB" "$OUT"
 
 BG_PIDS=""        # space-separated pids started by this script
 LAST_PID=""       # most recent bg() pid
-S2_PID="" S3_PID="" S6_PID="" S7_POLL_PID="" S7_WEB_PID="" TG_PID=""
+S2_PID="" S3_PID="" S5F_PID="" FILE_PID="" S6_PID="" S7_POLL_PID="" S7_WEB_PID="" TG_PID=""
 OLLAMA_PID=""     # set only when WE started `ollama serve`
 OLLAMA_OK=0       # 1 when a local Ollama server + model are usable (S11)
 OLLAMA_MODEL=""
@@ -63,6 +64,7 @@ unset AEGIS_PROVIDER AEGIS_MODEL AEGIS_MODEL_FAST AEGIS_MODEL_SMART \
       AEGIS_TELEGRAM_TOKEN AEGIS_TELEGRAM_CHATS AEGIS_TELEGRAM_MODE \
       AEGIS_TELEGRAM_WEBHOOK_URL AEGIS_TELEGRAM_WEBHOOK_SECRET \
       AEGIS_TELEGRAM_API_BASE AEGIS_TELEGRAM_WORKERS \
+      AEGIS_DOWNLOAD_TIMEOUT AEGIS_DOWNLOAD_MAX_BYTES AEGIS_DOWNLOAD_ALLOW_PRIVATE \
       OPENAI_API_KEY OPENAI_BASE_URL ANTHROPIC_API_KEY FOUNDRY_ENDPOINT
 
 # ---- output helpers ---------------------------------------------------------
@@ -176,7 +178,7 @@ run_watchdog() {
 agent_off() {
   local db=$1 out=$2; shift 2
   AEGIS_LLM=off AEGIS_DB_PATH="$db" AEGIS_WORKSPACE="$WS" \
-    "$REPO/bin/aegis-agent" "$*" >"$out" 2>"$out.err"
+    "$REPO/bin/aegis" agent "$*" >"$out" 2>"$out.err"
 }
 
 # http_post <url> <json> <outfile> — POST with a JSON body, response captured.
@@ -216,6 +218,13 @@ record() { # id result — append to the summary table
   if [ "$2" = "FAIL" ]; then FAILS=$((FAILS + 1)); fi
 }
 run_stage() { # id desc fn
+  # AEGIS_E2E_ONLY=<id>[,<id>…] narrows the run to named stages — a
+  # debugging affordance; stages that depend on earlier ones (S4 needs S3's
+  # serve) still need their prerequisites listed too.
+  if [ -n "${AEGIS_E2E_ONLY:-}" ] && ! case ",$AEGIS_E2E_ONLY," in *",$1,"*) true;; *) false;; esac; then
+    printf '  (skipped: AEGIS_E2E_ONLY)\n'
+    return 0
+  fi
   stage_hdr "$1" "$2"
   if $3; then
     record "$1" PASS; printf 'PASS %s\n' "$1"
@@ -242,15 +251,11 @@ s0() {
   (cd "$REPO" && make build) >"$OUT/build.log" 2>&1 || {
     bad "make build failed"; tail -20 "$OUT/build.log"; return 1
   }
-  # aegisctl is the admin tool; not part of `make build`'s deploy set.
-  (cd "$REPO" && go build -o bin/aegisctl ./cmd/aegisctl) >>"$OUT/build.log" 2>&1 || {
-    bad "building aegisctl failed"; tail -20 "$OUT/build.log"; return 1
-  }
   local b
-  for b in aegis-agent aegis-serve aegisctl mcp-echo-server; do
+  for b in aegis mcp-echo-server; do
     [ -x "$REPO/bin/$b" ] || { bad "missing binary bin/$b"; return 1; }
   done
-  note "built aegis-agent, aegis-serve, aegisctl, mcp-echo-server"
+  note "built aegis, mcp-echo-server"
 
   # grpcurl drives S5; missing = skip with a note (brew install grpcurl).
   if command -v grpcurl >/dev/null 2>&1; then
@@ -357,7 +362,7 @@ s2() {
     AEGIS_ADDR="127.0.0.1:$P_HTTP" AEGIS_GRPC_ADDR=none AEGIS_LLM=off \
     AEGIS_DB_PATH="$db" AEGIS_WORKSPACE="$WS" \
     AEGIS_RULES_RELOAD=2 AEGIS_MINER_INTERVAL=0 \
-    "$REPO/bin/aegis-serve"
+    "$REPO/bin/aegis" serve
   S2_PID=$LAST_PID
   wait_for "workspace serve healthy on :$P_HTTP" 20 \
     curl -sf "$url/healthz" || return 1
@@ -413,7 +418,7 @@ s3() {
     AEGIS_ADDR="127.0.0.1:$P_HTTP" AEGIS_GRPC_ADDR="127.0.0.1:$P_GRPC" AEGIS_LLM=off \
     AEGIS_DB_PATH="$db" AEGIS_WORKSPACE="$WS" \
     AEGIS_RULES_RELOAD=2 AEGIS_MINER_INTERVAL=0 \
-    "$REPO/bin/aegis-serve"
+    "$REPO/bin/aegis" serve
   S3_PID=$LAST_PID
   wait_for "serve A healthy on :$P_HTTP (gRPC on :$P_GRPC)" 20 \
     curl -sf "$url/healthz" || return 1
@@ -551,6 +556,134 @@ s5() {
 }
 
 # =====================================================================
+# S5F — file tools + background jobs: /mkdir /ls /download /job against a
+#       REAL filesystem and a REAL loopback download source, over both
+#       HTTP and gRPC (same serve process — jobs are per-process).
+# =====================================================================
+s5f() {
+  local db="$DB/s5f.db" o="$OUT/s5f" url="http://127.0.0.1:$P_HTTP"
+
+  # The download source: a real python3 http.server on loopback. The serve
+  # runs with AEGIS_DOWNLOAD_ALLOW_PRIVATE=on so loopback is fetchable.
+  mkdir -p "$WS/fixtures"
+  { for i in $(seq 1 160); do echo "aegis-e2e-download-fixture"; done
+    echo "END-MARKER-7f3a"; } >"$WS/fixtures/fixture.txt"
+  bg file-server python3 -m http.server "$P_FILE" --bind 127.0.0.1 \
+    --directory "$WS/fixtures"
+  FILE_PID=$LAST_PID
+  wait_for "fixture http.server up on :$P_FILE" 20 \
+    curl -sf "http://127.0.0.1:$P_FILE/fixture.txt" -o /dev/null || return 1
+
+  bg s5f-serve env \
+    AEGIS_ADDR="127.0.0.1:$P_HTTP" AEGIS_GRPC_ADDR="127.0.0.1:$P_GRPC" AEGIS_LLM=off \
+    AEGIS_DB_PATH="$db" AEGIS_WORKSPACE="$WS" \
+    AEGIS_RULES_RELOAD=2 AEGIS_MINER_INTERVAL=0 \
+    AEGIS_DOWNLOAD_ALLOW_PRIVATE=on AEGIS_DOWNLOAD_TIMEOUT=30 \
+    "$REPO/bin/aegis" serve
+  S5F_PID=$LAST_PID
+  wait_for "s5f serve healthy on :$P_HTTP (gRPC on :$P_GRPC)" 20 \
+    curl -sf "$url/healthz" || return 1
+
+  # The run response's "output" field holds the tool's JSON as a string —
+  # these helpers parse the nested document.
+  s5f_inner() { # file key — print an inner field of the answer JSON
+    python3 - "$1" "$2" <<'PY'
+import json, sys
+inner = json.loads(json.load(open(sys.argv[1]))["output"])
+print(inner[sys.argv[2]])
+PY
+  }
+  s5f_status_is() { # file status — exit 0 when the polled job matches
+    python3 - "$1" "$2" <<'PY'
+import json, sys
+try:
+    inner = json.loads(json.load(open(sys.argv[1]))["output"])
+    sys.exit(0 if inner["status"] == sys.argv[2] else 1)
+except Exception:
+    sys.exit(1)
+PY
+  }
+
+  # mkdir over HTTP: rule hit and a real directory appears in the workspace.
+  http_post "$url/v1/agent/run" '{"prompt":"/mkdir data/reports"}' "$o-mkdir.json" || return 1
+  assert_contains "$o-mkdir.json" '"decision_source":"regex_router"' \
+    "/mkdir deflected to the router" || return 1
+  [ -d "$WS/data/reports" ] || { bad "/mkdir did not create $WS/data/reports"; return 1; }
+  note "/mkdir created data/reports on disk"
+
+  # ls over HTTP: fresh directory listed; bare /ls lists the workspace root.
+  http_post "$url/v1/agent/run" '{"prompt":"/ls data"}' "$o-ls.json" || return 1
+  assert_contains "$o-ls.json" "reports" "/ls data lists the new directory" || return 1
+  http_post "$url/v1/agent/run" '{"prompt":"/ls"}' "$o-lsroot.json" || return 1
+  # The entry name is nested JSON-in-a-string, so match the escaped form.
+  assert_contains "$o-lsroot.json" '\"data\"' "bare /ls lists the workspace root" || return 1
+
+  # Escape attempt: the rule matches, the tool refuses — the sandbox holds.
+  http_post "$url/v1/agent/run" '{"prompt":"/mkdir ../escape"}' "$o-escape.json" || return 1
+  assert_contains "$o-escape.json" "escapes the workspace" \
+    "escape attempt rejected by the path sandbox" || return 1
+  [ ! -d "$WORK/escape" ] || { bad "escape directory created outside the workspace"; return 1; }
+
+  # download over HTTP: instant job_id, then poll /job until done.
+  http_post "$url/v1/agent/run" \
+    "{\"prompt\":\"/download http://127.0.0.1:$P_FILE/fixture.txt data/dl/fixture.txt\"}" \
+    "$o-dl.json" || return 1
+  assert_contains "$o-dl.json" '"decision_source":"regex_router"' \
+    "/download deflected to the router" || return 1
+  local job
+  job=$(s5f_inner "$o-dl.json" job_id) || { bad "no job_id in the download answer"; return 1; }
+  [ -n "$job" ] || { bad "empty job_id"; return 1; }
+  note "download started job $job"
+
+  s5f_job_done() {
+    http_post "$url/v1/agent/run" "{\"prompt\":\"/job $job\"}" "$OUT/s5f-job.tmp" \
+      && s5f_status_is "$OUT/s5f-job.tmp" done
+  }
+  wait_for "download job $job reaches done" 30 s5f_job_done || return 1
+  cmp -s "$WS/fixtures/fixture.txt" "$WS/data/dl/fixture.txt" \
+    || { bad "downloaded bytes differ from the fixture"; return 1; }
+  note "downloaded file matches the fixture byte-for-byte"
+  if ls "$WS/data/dl"/*.part >/dev/null 2>&1; then
+    bad "leftover .part after a successful download"; return 1
+  fi
+  note "no .part leftovers in data/dl"
+
+  # Failure path: a 404 source ends as an error job and leaves no file.
+  http_post "$url/v1/agent/run" \
+    "{\"prompt\":\"/download http://127.0.0.1:$P_FILE/nope.txt data/dl/nope.txt\"}" \
+    "$o-dl404.json" || return 1
+  local job404
+  job404=$(s5f_inner "$o-dl404.json" job_id) || { bad "no job_id for the 404 download"; return 1; }
+  s5f_job_error() {
+    http_post "$url/v1/agent/run" "{\"prompt\":\"/job $job404\"}" "$OUT/s5f-job404.tmp" \
+      && s5f_status_is "$OUT/s5f-job404.tmp" error
+  }
+  wait_for "404 download job reports error" 30 s5f_job_error || return 1
+  [ ! -e "$WS/data/dl/nope.txt" ] || { bad "failed download left a file behind"; return 1; }
+  note "failed download left no target file"
+
+  # gRPC surface (same serve process — the in-memory job registry is shared).
+  if [ "$GRPCURL_OK" = "1" ]; then
+    grpcurl -plaintext -d '{"prompt":"/mkdir data/grpcdir"}' "127.0.0.1:$P_GRPC" \
+      aegisgo.v1.Agent/Run >"$o-grpc.json" 2>"$o-grpc.err" \
+      || { bad "grpcurl Agent/Run /mkdir failed"; cat "$o-grpc.err"; return 1; }
+    assert_contains "$o-grpc.json" '"decisionSource": "regex_router"' \
+      "gRPC /mkdir deflected to the router" || return 1
+    [ -d "$WS/data/grpcdir" ] || { bad "gRPC /mkdir did not create the directory"; return 1; }
+    note "gRPC /mkdir created data/grpcdir on disk"
+
+    grpcurl -plaintext -d "{\"prompt\":\"/job $job\"}" "127.0.0.1:$P_GRPC" \
+      aegisgo.v1.Agent/Run >"$o-grpcjob.json" 2>"$o-grpcjob.err" \
+      || { bad "grpcurl Agent/Run /job failed"; cat "$o-grpcjob.err"; return 1; }
+    assert_contains "$o-grpcjob.json" '\"done\"' \
+      "gRPC /job reports the finished download" || return 1
+  fi
+
+  stop_bg "$S5F_PID" s5f-serve
+  stop_bg "$FILE_PID" file-server
+}
+
+# =====================================================================
 # S6 — external MCP server attach (stdio mcp-echo-server)
 # =====================================================================
 s6() {
@@ -559,7 +692,7 @@ s6() {
     AEGIS_DB_PATH="$DB/s6.db" AEGIS_WORKSPACE="$WS" \
     AEGIS_MCP_SERVERS="stdio:$REPO/bin/mcp-echo-server" \
     AEGIS_MINER_INTERVAL=0 \
-    "$REPO/bin/aegis-serve"
+    "$REPO/bin/aegis" serve
   S6_PID=$LAST_PID
   wait_for "MCP-attached serve healthy on :$P_AUX" 20 \
     curl -sf "http://127.0.0.1:$P_AUX/healthz" || return 1
@@ -653,7 +786,7 @@ JSON
     AEGIS_DB_PATH="$DB/s7poll.db" AEGIS_WORKSPACE="$WS" AEGIS_MINER_INTERVAL=0 \
     AEGIS_TELEGRAM_TOKEN=e2e-token AEGIS_TELEGRAM_CHATS=424242 \
     AEGIS_TELEGRAM_MODE=poll AEGIS_TELEGRAM_API_BASE="$tg" \
-    "$REPO/bin/aegis-serve"
+    "$REPO/bin/aegis" serve
   S7_POLL_PID=$LAST_PID
   s7_poll_replied() { grep -q 'regex_router via hostname' "$sent"; }
   wait_for "poll mode delivers the update and replies /hostname" 30 s7_poll_replied || return 1
@@ -669,7 +802,7 @@ JSON
     AEGIS_TELEGRAM_TOKEN=e2e-token AEGIS_TELEGRAM_CHATS=424242 \
     AEGIS_TELEGRAM_MODE=webhook AEGIS_TELEGRAM_WEBHOOK_URL="http://127.0.0.1:$P_S7WEB" \
     AEGIS_TELEGRAM_WEBHOOK_SECRET=e2e-secret AEGIS_TELEGRAM_API_BASE="$tg" \
-    "$REPO/bin/aegis-serve"
+    "$REPO/bin/aegis" serve
   S7_WEB_PID=$LAST_PID
   wait_for "webhook serve healthy on :$P_S7WEB" 20 \
     curl -sf "http://127.0.0.1:$P_S7WEB/healthz" || return 1
@@ -717,15 +850,15 @@ JSON
 }
 
 # =====================================================================
-# S8 — aegisctl admin ops (rules lifecycle, stats, replay)
+# S8 — aegis ctl admin ops (rules lifecycle, stats, replay)
 # =====================================================================
 s8() {
   local o="$OUT/s8"
-  ctl() { AEGIS_DB_PATH="$1" "$REPO/bin/aegisctl" "${@:2}"; }
+  ctl() { AEGIS_DB_PATH="$1" "$REPO/bin/aegis" ctl "${@:2}"; }
 
   # rules list + demote/promote against the S2 database (it holds the
   # hot-inserted search rule).
-  ctl "$DB/s2.db" rules list >"$o-list.txt" 2>"$o-list.err" || { bad "aegisctl rules list"; return 1; }
+  ctl "$DB/s2.db" rules list >"$o-list.txt" 2>"$o-list.err" || { bad "aegis ctl rules list"; return 1; }
   assert_contains "$o-list.txt" "NAME" "rules list prints a header" || return 1
   assert_contains "$o-list.txt" "uptime" "rules list shows seeded rules" || return 1
   assert_contains "$o-list.txt" "search_sales" "rules list shows the manual search rule" || return 1
@@ -740,7 +873,7 @@ s8() {
     "promote restores state to active" || return 1
 
   # stats + replay against the S3 database (REST traffic).
-  ctl "$DB/s3.db" stats >"$o-stats.json" 2>"$o-stats.err" || { bad "aegisctl stats"; return 1; }
+  ctl "$DB/s3.db" stats >"$o-stats.json" 2>"$o-stats.err" || { bad "aegis ctl stats"; return 1; }
   python3 - "$o-stats.json" <<'PY' || { bad "stats deflection rate not > 0"; return 1; }
 import json, sys
 s = json.load(open(sys.argv[1]))
@@ -766,8 +899,8 @@ PY
 # =====================================================================
 s9() {
   local db="$DB/s9.db" o="$OUT/s9"
-  # Boot the schema + seed once (aegisctl opens and migrates the DB).
-  AEGIS_DB_PATH="$db" "$REPO/bin/aegisctl" rules list >"$o-boot.txt" 2>&1 \
+  # Boot the schema + seed once (aegis ctl opens and migrates the DB).
+  AEGIS_DB_PATH="$db" "$REPO/bin/aegis" ctl rules list >"$o-boot.txt" 2>&1 \
     || { bad "booting s9 schema"; return 1; }
   sq "$db" "INSERT INTO fallback_events (ts,trace_id,normalized_prompt,raw_prompt,tools_used) VALUES
     (datetime('now'),'e2e-m9-1','summarize <path>','summarize notes/q3.md','read_doc'),
@@ -776,15 +909,15 @@ s9() {
     || { bad "seeding fallback corpus"; return 1; }
   note "seeded 3 same-shape fallback events (read_doc)"
 
-  AEGIS_DB_PATH="$db" "$REPO/bin/aegisctl" rules mine --threshold 3 >"$o-mine.txt" 2>&1 \
-    || { bad "aegisctl rules mine"; return 1; }
+  AEGIS_DB_PATH="$db" "$REPO/bin/aegis" ctl rules mine --threshold 3 >"$o-mine.txt" 2>&1 \
+    || { bad "aegis ctl rules mine"; return 1; }
   assert_contains "$o-mine.txt" "shadow rule mined_1" "miner proposes shadow rule mined_1" || return 1
 
   local n
   n=$(sq "$db" "SELECT COUNT(*) FROM rules WHERE name='mined_1' AND state='shadow' AND origin='mined'")
   assert_eq "$n" "1" "rules table gains the mined_1 shadow row" || return 1
 
-  AEGIS_DB_PATH="$db" "$REPO/bin/aegisctl" rules list >"$o-list.txt" || return 1
+  AEGIS_DB_PATH="$db" "$REPO/bin/aegis" ctl rules list >"$o-list.txt" || return 1
   assert_matches "$o-list.txt" '^mined_1[[:space:]]+shadow' "rules list shows mined_1 as shadow" || return 1
 }
 
@@ -820,30 +953,45 @@ s10() {
 }
 
 # =====================================================================
-# S11 — real LLM fallback via local Ollama (+ MCP echo tool invocation)
+# S11 — real LLM fallback via local Ollama (+ MCP echo tool invocation,
+# + the AEGIS_CLASSIFIER fast tier on a free-form tool-shaped prompt)
 # =====================================================================
 s11() {
   local db="$DB/s11.db" o="$OUT/s11"
 
-  # A 0.5b model doing tool calls over OpenAI-compat gets room (240s),
-  # bounded by run_watchdog so a hang fails loudly instead of stalling CI.
-  # The prompt pins a marker ('e2e-tool-call'): the echo tool returns its
-  # message verbatim, so a compliant final answer quotes the marker — the
-  # stage proves the Ollama LLM really drove the MCP echo tool end-to-end.
-  run_watchdog 240 env \
-    AEGIS_LLM=on \
-    AEGIS_PROVIDER=openai-compat \
-    OPENAI_BASE_URL=http://localhost:11434/v1 \
-    OPENAI_API_KEY=ollama \
-    AEGIS_MODEL="$OLLAMA_MODEL" \
-    AEGIS_MCP_SERVERS="stdio:$REPO/bin/mcp-echo-server" \
-    AEGIS_DB_PATH="$db" AEGIS_WORKSPACE="$WS" AEGIS_MINER_INTERVAL=0 \
-    "$REPO/bin/aegis-agent" \
-    "Call the echo tool with the exact message 'e2e-tool-call', then reply with the exact text the tool returned." \
-    >"$o-llm.out" 2>"$o-llm.err" || { bad "LLM run failed/timed out"; tail -5 "$o-llm.err"; return 1; }
+  # A 0.5b model doing tool calls over OpenAI-compat gets room (240s per
+  # attempt), bounded by run_watchdog so a hang fails loudly instead of
+  # stalling CI. The prompt pins a marker ('e2e-tool-call'): the echo tool
+  # returns its message verbatim, so a compliant final answer quotes the
+  # marker — the stage proves the Ollama LLM really drove the MCP echo tool
+  # end-to-end. Small models sometimes drop the marker from the final
+  # synthesis even after a correct tool call, so a few attempts are allowed;
+  # the DB is reset per attempt to keep the assertions attempt-scoped.
+  local attempt ok_echo=0
+  for attempt in 1 2 3; do
+    rm -f "$db"
+    run_watchdog 240 env \
+      AEGIS_LLM=on \
+      AEGIS_PROVIDER=openai-compat \
+      OPENAI_BASE_URL=http://localhost:11434/v1 \
+      OPENAI_API_KEY=ollama \
+      AEGIS_MODEL="$OLLAMA_MODEL" \
+      AEGIS_MCP_SERVERS="stdio:$REPO/bin/mcp-echo-server" \
+      AEGIS_DB_PATH="$db" AEGIS_WORKSPACE="$WS" AEGIS_MINER_INTERVAL=0 \
+      "$REPO/bin/aegis" agent \
+      "Call the echo tool with the exact message 'e2e-tool-call', then reply with the exact text the tool returned." \
+      >"$o-llm.out" 2>"$o-llm.err" || { note "LLM attempt $attempt failed/timed out — retrying"; continue; }
+    if grep -qF "e2e-tool-call" "$o-llm.out"; then ok_echo=1; break; fi
+    note "LLM attempt $attempt dropped the echoed marker — retrying"
+  done
+  if [ "$ok_echo" != "1" ]; then
+    bad "LLM never quoted the echoed marker after $attempt attempts"
+    sed -n '1,5p' "$o-llm.out" | sed 's/^/        | /'
+    return 1
+  fi
 
   [ -s "$o-llm.out" ] || { bad "LLM answer is empty"; cat "$o-llm.err"; return 1; }
-  note "LLM answered ($(wc -c <"$o-llm.out" | tr -d ' ') bytes)"
+  note "LLM answered ($(wc -c <"$o-llm.out" | tr -d ' ') bytes, attempt $attempt)"
 
   local n_llm n_fb tools
   n_llm=$(sq "$db" "SELECT COUNT(*) FROM audit_events WHERE decision_source='llm'")
@@ -868,6 +1016,40 @@ s11() {
   esac
   assert_contains "$o-llm.out" "e2e-tool-call" \
     "answer quotes the echoed marker 'e2e-tool-call'" || return 1
+
+  # ---- classifier tier (AEGIS_CLASSIFIER=on): a free-form, tool-shaped
+  # prompt must resolve through the fast tier (decision_source=llm_classifier)
+  # and seed the mining corpus with its tool choice. Small local models can
+  # flake on JSON emission, so a few bounded retries are allowed — a decline
+  # is correct engine behavior (it falls through to the LLM), but this block
+  # pins the happy path end to end.
+  local cls_db="$DB/s11c.db" n_cls=0 ok_cls=0 attempt
+  for attempt in 1 2 3; do
+    run_watchdog 120 env \
+      AEGIS_LLM=on AEGIS_CLASSIFIER=on \
+      AEGIS_PROVIDER=openai-compat \
+      OPENAI_BASE_URL=http://localhost:11434/v1 \
+      OPENAI_API_KEY=ollama \
+      AEGIS_MODEL="$OLLAMA_MODEL" AEGIS_MODEL_FAST="$OLLAMA_MODEL" \
+      AEGIS_DB_PATH="$cls_db" AEGIS_WORKSPACE="$WS" AEGIS_MINER_INTERVAL=0 \
+      "$REPO/bin/aegis" agent \
+      "Read the CSV file at data/sales.csv and show me only the first 2 data rows." \
+      >"$o-cls.out" 2>"$o-cls.err" || { bad "classifier attempt $attempt failed/timed out"; tail -5 "$o-cls.err"; return 1; }
+    n_cls=$(sq "$cls_db" "SELECT COUNT(*) FROM audit_events WHERE decision_source='llm_classifier'")
+    if [ "${n_cls:-0}" -ge 1 ]; then ok_cls=1; break; fi
+    note "classifier attempt $attempt declined (fell through to the LLM) — retrying"
+  done
+  if [ "$ok_cls" != "1" ]; then
+    bad "classifier never resolved after $attempt attempts"
+    sed -n '1,5p' "$o-cls.out" | sed 's/^/        | /'
+    return 1
+  fi
+  note "classifier resolved on attempt $attempt"
+  assert_contains "$o-cls.out" "alice" \
+    "classifier answer carries the CSV rows" || return 1
+  local n_corpus
+  n_corpus=$(sq "$cls_db" "SELECT COUNT(*) FROM fallback_events WHERE tools_used='read_csv'")
+  assert_ge "$n_corpus" 1 "classifier hit seeds the mining corpus (tools_used=read_csv)" || return 1
 }
 
 # =====================================================================
@@ -903,7 +1085,7 @@ main() {
   printf 'aegisgo e2e — %s\n  repo %s\n  work %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$REPO" "$WORK"
 
   local busy="" hint="" p
-  for p in $P_HTTP $P_GRPC $P_AUX $P_S7WEB $P_TG; do
+  for p in $P_HTTP $P_GRPC $P_AUX $P_S7WEB $P_FILE $P_TG; do
     if port_busy "$p"; then busy="$busy $p"; fi
   done
   # lsof takes one port per -iTCP flag; build a paste-ready command that
@@ -927,17 +1109,20 @@ main() {
     skip_stage S5 "gRPC surface (grpcurl)" "grpcurl not installed (brew install grpcurl)"
   fi
   stop_if_alive "$S3_PID" s3-serve   # graceful drain before the DB is inspected
+  run_stage S5F "file tools + background jobs (HTTP + gRPC)" s5f
+  stop_if_alive "$S5F_PID" s5f-serve # failure-path teardown (happy path stopped them)
+  stop_if_alive "$FILE_PID" file-server
   run_stage S6 "MCP server attach" s6
   stop_if_alive "$S6_PID" s6-serve   # free :18082 for the poll-mode serve
   run_stage S7 "Telegram (fake Bot API: poll + webhook)" s7
   stop_if_alive "$S7_WEB_PID" s7-web
   stop_if_alive "$S7_POLL_PID" s7-poll
   stop_if_alive "$TG_PID" tg-fake
-  run_stage S8 "aegisctl admin ops" s8
+  run_stage S8 "aegis ctl admin ops" s8
   run_stage S9 "miner demo" s9
   run_stage S10 "audit trail joins" s10
   if [ "$OLLAMA_OK" = "1" ]; then
-    run_stage S11 "Ollama LLM fallback + MCP echo" s11
+    run_stage S11 "Ollama LLM fallback + MCP echo + classifier tier" s11
   else
     skip_stage S11 "Ollama LLM fallback + MCP echo" "no ollama model available (ollama pull qwen2.5:0.5b)"
   fi

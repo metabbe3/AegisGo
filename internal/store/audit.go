@@ -11,10 +11,11 @@ import (
 // Decision sources — the contract every request path reports. These are the
 // spec's audit fields: every row and log line carries one.
 const (
-	SourceRouter = "regex_router" // deterministic rule matched, native Go executed
-	SourceLLM    = "llm"          // no rule matched, LLM fallback answered
-	SourceLLMOff = "llm_disabled" // no rule matched and AEGIS_LLM=off
-	SourceError  = "error"
+	SourceRouter        = "regex_router"   // deterministic rule matched, native Go executed
+	SourceLLM           = "llm"            // no rule matched, LLM fallback answered
+	SourceLLMOff        = "llm_disabled"   // no rule matched and AEGIS_LLM=off
+	SourceLLMClassifier = "llm_classifier" // fast tier chose a native tool on a miss (AEGIS_CLASSIFIER)
+	SourceError         = "error"
 )
 
 // Interface names recorded on audit rows.

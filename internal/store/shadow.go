@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -37,7 +38,10 @@ func (s *Store) RecordShadow(ctx context.Context, ev ShadowEvent) error {
 }
 
 // ShadowStreak counts consecutive agreements for a rule, most recent first,
-// stopping at the first disagreement. The promotion signal.
+// stopping at the first disagreement. The promotion signal. Streams instead
+// of QueryAll on purpose: this runs per shadow comparison (a request path)
+// and the common case meets its disagreement in the first few rows —
+// materializing all 100 would be pure waste.
 func (s *Store) ShadowStreak(ctx context.Context, rule string) (int, error) {
 	rows, err := s.Query(ctx,
 		`SELECT agreed FROM shadow_events WHERE rule_name=? ORDER BY id DESC LIMIT 100`, rule)
@@ -47,11 +51,11 @@ func (s *Store) ShadowStreak(ctx context.Context, rule string) (int, error) {
 	defer rows.Close()
 	streak := 0
 	for rows.Next() {
-		var agreed int
-		if err := rows.Scan(&agreed); err != nil {
+		var a int
+		if err := rows.Scan(&a); err != nil {
 			return 0, err
 		}
-		if agreed == 0 {
+		if a == 0 {
 			break
 		}
 		streak++
@@ -65,27 +69,21 @@ func (s *Store) SetRuleState(ctx context.Context, rule, state string, enabled bo
 		state, boolToInt(enabled), rule)
 }
 
-// RuleStates lists every rule with its state (aegisctl `rules list`).
+// RuleStates lists every rule with its state (`aegis ctl rules list`).
 func (s *Store) RuleStates(ctx context.Context) ([]map[string]any, error) {
-	rows, err := s.Query(ctx,
-		`SELECT name, pattern, tool, origin, state, enabled FROM rules ORDER BY origin, name`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []map[string]any
-	for rows.Next() {
-		var name, pattern, tool, origin, state string
-		var enabled int
-		if err := rows.Scan(&name, &pattern, &tool, &origin, &state, &enabled); err != nil {
-			return nil, err
-		}
-		out = append(out, map[string]any{
-			"name": name, "pattern": pattern, "tool": tool,
-			"origin": origin, "state": state, "enabled": enabled == 1,
+	return QueryAll(ctx, s,
+		`SELECT name, pattern, tool, origin, state, enabled FROM rules ORDER BY origin, name`,
+		func(r *sql.Rows) (map[string]any, error) {
+			var name, pattern, tool, origin, state string
+			var enabled int
+			if err := r.Scan(&name, &pattern, &tool, &origin, &state, &enabled); err != nil {
+				return nil, err
+			}
+			return map[string]any{
+				"name": name, "pattern": pattern, "tool": tool,
+				"origin": origin, "state": state, "enabled": enabled == 1,
+			}, nil
 		})
-	}
-	return out, rows.Err()
 }
 
 // NextMinedName returns an unused mined-rule name.

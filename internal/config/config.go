@@ -65,7 +65,7 @@ type Config struct {
 	// MCP endpoint.
 	MCPServers []string
 
-	// Addr is the listen address for aegis-serve (default ":8080").
+	// Addr is the listen address for `aegis serve` (default ":8080").
 	Addr string
 
 	// GRPCAddr is the gRPC listener address (default ":8081"). Set
@@ -123,28 +123,45 @@ type Config struct {
 	// TelegramAPIBase overrides the Bot API base URL (tests, self-hosted
 	// bot API servers); empty = api.telegram.org.
 	TelegramAPIBase string
+
+	// DownloadTimeoutSecs bounds one background download end-to-end
+	// (AEGIS_DOWNLOAD_TIMEOUT, default 120). Hard validation lives in the
+	// tools layer so it also applies in AEGIS_LLM=off mode.
+	DownloadTimeoutSecs int
+	// DownloadMaxBytes caps each download's size (AEGIS_DOWNLOAD_MAX_BYTES,
+	// default 64 MiB; validation as above).
+	DownloadMaxBytes int64
+	// DownloadAllowPrivate permits loopback/private download URLs
+	// (AEGIS_DOWNLOAD_ALLOW_PRIVATE=on; off by default).
+	DownloadAllowPrivate bool
+
+	// Classifier enables the Dify-style fast tier: on a router miss, one
+	// cheap AEGIS_MODEL_FAST call tries to pick a native tool before the
+	// smart LLM runs (AEGIS_CLASSIFIER=on; off by default). Requires
+	// AEGIS_MODEL_FAST.
+	Classifier string
 }
 
 // Load reads configuration from the environment and applies defaults.
 func Load() Config {
 	return Config{
-		Provider:        strings.TrimSpace(os.Getenv("AEGIS_PROVIDER")),
-		Model:           strings.TrimSpace(os.Getenv("AEGIS_MODEL")),
-		ModelFast:       strings.TrimSpace(os.Getenv("AEGIS_MODEL_FAST")),
-		ModelSmart:      strings.TrimSpace(os.Getenv("AEGIS_MODEL_SMART")),
-		Instructions:    strings.TrimSpace(os.Getenv("AEGIS_INSTRUCTIONS")),
-		OpenAIKey:       strings.TrimSpace(os.Getenv("OPENAI_API_KEY")),
-		OpenAIBaseURL:   strings.TrimSpace(os.Getenv("OPENAI_BASE_URL")),
-		AnthropicKey:    strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")),
-		FoundryEndpoint: strings.TrimSpace(os.Getenv("FOUNDRY_ENDPOINT")),
-		Workspace:       strings.TrimSpace(os.Getenv("AEGIS_WORKSPACE")),
+		Provider:        envTrim("AEGIS_PROVIDER"),
+		Model:           envTrim("AEGIS_MODEL"),
+		ModelFast:       envTrim("AEGIS_MODEL_FAST"),
+		ModelSmart:      envTrim("AEGIS_MODEL_SMART"),
+		Instructions:    envTrim("AEGIS_INSTRUCTIONS"),
+		OpenAIKey:       envTrim("OPENAI_API_KEY"),
+		OpenAIBaseURL:   envTrim("OPENAI_BASE_URL"),
+		AnthropicKey:    envTrim("ANTHROPIC_API_KEY"),
+		FoundryEndpoint: envTrim("FOUNDRY_ENDPOINT"),
+		Workspace:       envTrim("AEGIS_WORKSPACE"),
 		MCPServers:      parseList(os.Getenv("AEGIS_MCP_SERVERS")),
 		Addr:            envOr("AEGIS_ADDR", ":8080"),
 		GRPCAddr:        envOr("AEGIS_GRPC_ADDR", ":8081"),
 		LogLevel:        envOr("AEGIS_LOG_LEVEL", "info"),
 		LLM:             envOr("AEGIS_LLM", "on"),
 		DBPath:          envOr("AEGIS_DB_PATH", "aegisgo.db"),
-		SQLDSN:          strings.TrimSpace(os.Getenv("AEGIS_SQL_DSN")),
+		SQLDSN:          envTrim("AEGIS_SQL_DSN"),
 		SQLMode:         envOr("AEGIS_SQL_MODE", "ro"),
 		RulesReloadSecs: AtoiDefault(os.Getenv("AEGIS_RULES_RELOAD"), 30),
 
@@ -152,13 +169,18 @@ func Load() Config {
 		MinerPromoteAfter: AtoiDefault(os.Getenv("AEGIS_MINER_PROMOTE_AFTER"), 5),
 		MinerIntervalSecs: AtoiDefault(os.Getenv("AEGIS_MINER_INTERVAL"), 3600),
 
-		TelegramToken:         strings.TrimSpace(os.Getenv("AEGIS_TELEGRAM_TOKEN")),
+		TelegramToken:         envTrim("AEGIS_TELEGRAM_TOKEN"),
 		TelegramChats:         parseInt64List(os.Getenv("AEGIS_TELEGRAM_CHATS")),
 		TelegramMode:          envOr("AEGIS_TELEGRAM_MODE", "auto"),
-		TelegramWebhookURL:    strings.TrimSpace(os.Getenv("AEGIS_TELEGRAM_WEBHOOK_URL")),
-		TelegramWebhookSecret: strings.TrimSpace(os.Getenv("AEGIS_TELEGRAM_WEBHOOK_SECRET")),
+		TelegramWebhookURL:    envTrim("AEGIS_TELEGRAM_WEBHOOK_URL"),
+		TelegramWebhookSecret: envTrim("AEGIS_TELEGRAM_WEBHOOK_SECRET"),
 		TelegramWorkers:       AtoiDefault(os.Getenv("AEGIS_TELEGRAM_WORKERS"), 4),
-		TelegramAPIBase:       strings.TrimSpace(os.Getenv("AEGIS_TELEGRAM_API_BASE")),
+		TelegramAPIBase:       envTrim("AEGIS_TELEGRAM_API_BASE"),
+
+		DownloadTimeoutSecs:  AtoiDefault(os.Getenv("AEGIS_DOWNLOAD_TIMEOUT"), 120),
+		DownloadMaxBytes:     int64(AtoiDefault(os.Getenv("AEGIS_DOWNLOAD_MAX_BYTES"), 64<<20)),
+		DownloadAllowPrivate: onSwitch(envTrim("AEGIS_DOWNLOAD_ALLOW_PRIVATE"), false),
+		Classifier:           envOr("AEGIS_CLASSIFIER", "off"),
 	}
 }
 
@@ -181,7 +203,7 @@ func (c Config) TelegramUseWebhook() bool {
 // parseInt64List parses a comma-separated list of integers.
 func parseInt64List(s string) []int64 {
 	var out []int64
-	for _, part := range strings.Split(s, ",") {
+	for part := range strings.SplitSeq(s, ",") {
 		if part = strings.TrimSpace(part); part == "" {
 			continue
 		}
@@ -193,7 +215,11 @@ func parseInt64List(s string) []int64 {
 }
 
 // LLMDisabled reports whether the LLM fallback kill switch is on.
-func (c Config) LLMDisabled() bool { return strings.EqualFold(c.LLM, "off") }
+func (c Config) LLMDisabled() bool { return !onSwitch(c.LLM, true) }
+
+// ClassifierEnabled reports whether the fast-tier classifier should boot.
+// The kill switch stays absolute: AEGIS_LLM=off disables it too.
+func (c Config) ClassifierEnabled() bool { return onSwitch(c.Classifier, false) }
 
 // GRPCEnabled reports whether the gRPC interface should listen.
 func (c Config) GRPCEnabled() bool {
@@ -279,9 +305,26 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
+// envTrim reads one env var, whitespace-stripped.
+func envTrim(key string) string { return strings.TrimSpace(os.Getenv(key)) }
+
+// onSwitch interprets an on/off-style flag: explicit "on"/"off" (any case)
+// decide, anything else — blank or unrecognized — falls back to def. One
+// spelling of "toggle env var" across the config surface.
+func onSwitch(s string, def bool) bool {
+	switch {
+	case strings.EqualFold(s, "on"):
+		return true
+	case strings.EqualFold(s, "off"):
+		return false
+	default:
+		return def
+	}
+}
+
 func parseList(s string) []string {
 	var out []string
-	for _, part := range strings.Split(s, ",") {
+	for part := range strings.SplitSeq(s, ",") {
 		if part = strings.TrimSpace(part); part != "" {
 			out = append(out, part)
 		}
