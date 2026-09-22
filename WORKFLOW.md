@@ -205,3 +205,20 @@ APIs churn; never import from `reference/`.
 - Anything touching `resolvePath`, the system_command catalog, SQL policy,
   or the store's batcher deserves an extra careful re-read — those are the
   security and data-integrity boundaries.
+
+## HITL approvals (L2 actions, ADR-0003)
+
+L2-tier actions pause for a human decision. From an allowlisted Telegram
+chat:
+
+```
+/approvals          # list pending (oldest first, capped at 10)
+/approve 3          # approve approval #3
+/deny 3             # deny approval #3
+/approve            # bare form: decides the OLDEST pending
+```
+
+Decisions are pending-only: re-deciding an already-approved/denied/expired
+row is a reported no-op, never an error or a state flip. The transport
+never executes the action — an approved executor re-validates policy at
+run time (fail-closed).

@@ -3,6 +3,7 @@ package telegram
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -24,7 +25,7 @@ func dispatcherWithStore(t *testing.T, e engineRunner, c Client, logger *slog.Lo
 	}
 	t.Cleanup(func() { st.Close() }) // Store.Close is idempotent
 	inbox := NewInbox(st)
-	return NewDispatcher(e, c, inbox, []int64{chatOK}, nil, logger), inbox, st
+	return NewDispatcher(e, c, inbox, []int64{chatOK}, nil, logger, nil), inbox, st
 }
 
 // TestWaitChatContextCancelled drains the fixed burst (bucketBurst tokens)
@@ -264,7 +265,7 @@ func TestRulesTextVariants(t *testing.T) {
 		t.Cleanup(func() { st.Close() })
 		c2 := &fakeClient{}
 		in2 := NewInbox(st)
-		d2 := NewDispatcher(fakeEngine{answer: "x"}, c2, in2, []int64{chatOK}, tc.rules, nil)
+		d2 := NewDispatcher(fakeEngine{answer: "x"}, c2, in2, []int64{chatOK}, tc.rules, nil, nil)
 		d2.Process(ctx, feed(t, in2, 31, "/rules"))
 		if len(c2.sends) != 1 || !strings.Contains(c2.sends[0], tc.want) {
 			t.Errorf("%s: /rules reply = %v, want %q", tc.name, c2.sends, tc.want)
@@ -324,5 +325,140 @@ func TestEditAndFallbackBothFail(t *testing.T) {
 func TestFormatReplyNoOutput(t *testing.T) {
 	if got := formatReply(engine.Result{}); got != "(no output)" {
 		t.Errorf("formatReply(empty) = %q, want (no output)", got)
+	}
+}
+
+// --- HITL commands (ADR-0003 wiring) ---
+
+// fakeApprover stands in for *store.Store when tests only exercise text.
+type fakeApprover struct {
+	pending []store.Approval
+	decided map[int64]string
+	fail    bool
+}
+
+func (f *fakeApprover) PendingApprovals(ctx context.Context, limit int) ([]store.Approval, error) {
+	if f.fail {
+		return nil, errFake
+	}
+	return f.pending, nil
+}
+
+func (f *fakeApprover) DecideApproval(ctx context.Context, id int64, state, by string) (bool, error) {
+	if f.fail {
+		return false, errFake
+	}
+	for _, a := range f.pending {
+		if a.ID == id {
+			if _, ok := f.decided[id]; ok {
+				return false, nil
+			}
+			if f.decided == nil {
+				f.decided = map[int64]string{}
+			}
+			f.decided[id] = state
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// lastSend returns the most recent sent text (test helper).
+func lastSend(c *fakeClient) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.sends) == 0 {
+		return ""
+	}
+	return c.sends[len(c.sends)-1]
+}
+
+func newHitlDispatcher(t *testing.T, ap approver) (*Dispatcher, *Inbox, *fakeClient) {
+	t.Helper()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	st, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+	c := &fakeClient{}
+	inbox := NewInbox(st)
+	return NewDispatcher(fakeEngine{answer: "x"}, c, inbox, []int64{chatOK}, nil, logger, ap), inbox, c
+}
+
+func TestApprovalsCommandLists(t *testing.T) {
+	ap := &fakeApprover{pending: []store.Approval{
+		{ID: 1, Kind: "system_command", Payload: `{"command":"restart"}`, Reason: "L2: restart"},
+	}}
+	d, inbox, c := newHitlDispatcher(t, ap)
+	d.Process(t.Context(), feed(t, inbox, 9001, "/approvals"))
+	if !strings.Contains(lastSend(c), "#1 system_command") || !strings.Contains(lastSend(c), "/approve 1") {
+		t.Errorf("approvals text wrong: %q", lastSend(c))
+	}
+}
+
+func TestApprovalsEmpty(t *testing.T) {
+	d, inbox, c := newHitlDispatcher(t, &fakeApprover{})
+	d.Process(t.Context(), feed(t, inbox, 9002, "/approvals"))
+	if !strings.Contains(lastSend(c), "No pending") {
+		t.Errorf("empty text wrong: %q", lastSend(c))
+	}
+}
+
+func TestApproveWithID(t *testing.T) {
+	ap := &fakeApprover{pending: []store.Approval{{ID: 3, Kind: "k", Payload: "{}", Reason: "r"}}}
+	d, inbox, c := newHitlDispatcher(t, ap)
+	d.Process(t.Context(), feed(t, inbox, 9003, "/approve 3"))
+	if !strings.Contains(lastSend(c), "#3 approved") {
+		t.Errorf("approve text wrong: %q", lastSend(c))
+	}
+	if ap.decided[3] != "approved" {
+		t.Errorf("decided = %v, want approved", ap.decided)
+	}
+}
+
+func TestDenyWithID(t *testing.T) {
+	ap := &fakeApprover{pending: []store.Approval{{ID: 4, Kind: "k", Payload: "{}", Reason: "r"}}}
+	d, inbox, c := newHitlDispatcher(t, ap)
+	d.Process(t.Context(), feed(t, inbox, 9004, "/deny 4"))
+	if !strings.Contains(lastSend(c), "#4 denied") {
+		t.Errorf("deny text wrong: %q", lastSend(c))
+	}
+}
+
+func TestApproveBareUsesOldest(t *testing.T) {
+	ap := &fakeApprover{pending: []store.Approval{
+		{ID: 7, Kind: "k", Payload: "{}", Reason: "r"},
+		{ID: 9, Kind: "k", Payload: "{}", Reason: "r"},
+	}}
+	d, inbox, c := newHitlDispatcher(t, ap)
+	d.Process(t.Context(), feed(t, inbox, 9005, "/approve"))
+	if !strings.Contains(lastSend(c), "#7 approved") {
+		t.Errorf("bare approve should pick oldest: %q", lastSend(c))
+	}
+}
+
+func TestApproveNoopSurfacesHonestly(t *testing.T) {
+	ap := &fakeApprover{} // nothing pending
+	d, inbox, c := newHitlDispatcher(t, ap)
+	d.Process(t.Context(), feed(t, inbox, 9006, "/approve 12"))
+	if !strings.Contains(lastSend(c), "not pending") && !strings.Contains(lastSend(c), "Nothing pending") {
+		t.Errorf("no-op must be surfaced, got: %q", lastSend(c))
+	}
+}
+
+func TestApproveInvalidIDRejected(t *testing.T) {
+	d, inbox, c := newHitlDispatcher(t, &fakeApprover{})
+	d.Process(t.Context(), feed(t, inbox, 9007, "/approve abc"))
+	if !strings.Contains(lastSend(c), "Not a valid approval id") {
+		t.Errorf("invalid id text wrong: %q", lastSend(c))
+	}
+}
+
+func TestApprovalsUnwired(t *testing.T) {
+	d, inbox, c := newHitlDispatcher(t, nil)
+	d.Process(t.Context(), feed(t, inbox, 9008, "/approvals"))
+	if !strings.Contains(lastSend(c), "unavailable") {
+		t.Errorf("unwired text wrong: %q", lastSend(c))
 	}
 }

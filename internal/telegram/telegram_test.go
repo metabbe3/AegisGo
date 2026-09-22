@@ -108,7 +108,7 @@ func harness(t *testing.T, e engineRunner, c Client) (*Dispatcher, *Inbox) {
 	inbox := NewInbox(st)
 	d := NewDispatcher(e, c, inbox, []int64{chatOK}, func() []string {
 		return []string{"uptime → /uptime → system_command"}
-	}, nil)
+	}, nil, st)
 	return d, inbox
 }
 

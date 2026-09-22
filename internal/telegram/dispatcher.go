@@ -35,6 +35,8 @@ type Dispatcher struct {
 	// rules renders the /rules listing.
 	rules  func() []string
 	logger *slog.Logger
+	// approver backs the HITL commands; nil disables them.
+	approver approver
 
 	mu      sync.Mutex
 	buckets map[int64]*chatBucket
@@ -45,9 +47,17 @@ type engineRunner interface {
 	Run(ctx context.Context, prompt string) engine.Result
 }
 
+// approver is the slice of *store.Store the dispatcher needs for HITL
+// commands (/approvals, /approve, /deny). Nil disables them.
+type approver interface {
+	PendingApprovals(ctx context.Context, limit int) ([]store.Approval, error)
+	DecideApproval(ctx context.Context, id int64, state, decidedBy string) (bool, error)
+}
+
 // NewDispatcher builds the core. rules may be nil (then /rules says so).
+// ap may be nil — HITL commands are then reported as unavailable.
 func NewDispatcher(e engineRunner, c Client, inbox *Inbox,
-	allowChats []int64, rules func() []string, logger *slog.Logger) *Dispatcher {
+	allowChats []int64, rules func() []string, logger *slog.Logger, ap approver) *Dispatcher {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -58,6 +68,7 @@ func NewDispatcher(e engineRunner, c Client, inbox *Inbox,
 	return &Dispatcher{
 		engine: e, client: c, inbox: inbox, allow: allow,
 		rules: rules, logger: logger, buckets: make(map[int64]*chatBucket),
+		approver: ap,
 	}
 }
 
@@ -86,6 +97,32 @@ func (d *Dispatcher) Process(ctx context.Context, row InboxRow) {
 	case "/rules":
 		d.claimAndSend(ctx, row, d.rulesText())
 		return
+	case "/approvals":
+		d.claimAndSend(ctx, row, d.approvalsText(ctx))
+		return
+	case "/deny":
+		d.claimAndSend(ctx, row, d.decideText(ctx, row, "denied"))
+		return
+	case "/approve":
+		d.claimAndSend(ctx, row, d.decideText(ctx, row, "approved"))
+		return
+	}
+
+	// HITL prefixed forms: "/approve 3", "/deny 3" (id first word after the
+	// command). Kept OUT of the engine path — approvals are transport-level,
+	// never router rules (the router must not be able to approve anything).
+	if id, rest, ok := strings.Cut(strings.TrimPrefix(row.Text, "/"), " "); ok {
+		state := ""
+		switch id {
+		case "approve":
+			state = "approved"
+		case "deny":
+			state = "denied"
+		}
+		if state != "" {
+			d.claimAndSend(ctx, row, d.decideIDText(ctx, row, state, rest))
+			return
+		}
 	}
 
 	// Idempotency first: claim the reply atomically. A redelivery, a second
@@ -190,6 +227,7 @@ func (d *Dispatcher) helpText() string {
 		"Router commands answer instantly and free: /uptime /disk /memory /hostname /kernel /who\n" +
 		"/csv_summary <path> · /csv_head <path> [rows]\n" +
 		"/rules lists every active rule.\n" +
+		"HITL: /approvals lists pending · /approve <id> · /deny <id> (bare /approve decides the oldest).\n" +
 		"Anything else goes to the LLM (if enabled)."
 }
 

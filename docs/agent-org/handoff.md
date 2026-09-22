@@ -43,3 +43,18 @@
 - **Next first step**: wire the ledger — engine L2 executor stub
   (create approval → wait → run if approved) + Telegram /approve /
   /deny commands. REST endpoints after.
+
+## 2026-09-22 (session 5 — Telegram HITL wiring)
+
+- **Done**: feat/telegram-approvals — /approvals, /approve <id>, /deny <id>,
+  bare /approve = oldest. approver interface (2 methods), nil-safe; app.go
+  passes the store; 8 dispatcher tests; help + WORKFLOW recipes; ADR-0004.
+  Gates green (vet/test/check/cover 93.3%).
+- **Design lock**: HITL commands are transport-level, NEVER router rules —
+  the router cannot approve anything (separation of powers, ADR-0002/4).
+- **Jev note**: owner asked "pastikan jev function ditambahkan jika
+  berguna". Useful slice identified: typed verdicts (L1/L2/L3) +
+  pending-only CAS already ARE jev-style constrained decisions. Deferred:
+  logprob-confidence POC until a real decision point needs it.
+- **Next first step**: L2 executor loop (engine side): tool run hits L2 →
+  CreateApproval → poll DecideApproval → execute after policy re-check.
