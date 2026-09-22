@@ -5,6 +5,12 @@ adapts it to agent-org merges (every entry = one feature branch merged).
 
 ## [Unreleased]
 
+### Fixed
+- 2026-09-22 — Inline buttons did NOTHING on tap (P0, owner-reported):
+  allowed_updates lacked callback_query so Telegram never delivered
+  button presses. Fixed in long-poll AND webhook; regression test
+  pinned (LL-008).
+
 ### Added
 - 2026-09-22 — Decision-time message editing (ADR-0009): pushed button
   messages are rewritten to "✅/🚫 #N verdict by X" on decide — stale
