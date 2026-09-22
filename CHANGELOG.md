@@ -6,6 +6,11 @@ adapts it to agent-org merges (every entry = one feature branch merged).
 ## [Unreleased]
 
 ### Added
+- 2026-09-22 — launchd service (chore/launchd-service):
+  scripts/install-launchd.sh installs aegis-serve as com.aegisgo.serve
+  (RunAtLoad + KeepAlive + 30s throttle; binary at ~/.hermes/bin; token
+  stays in the env file, never the repo). Live-verified: kill →
+  auto-restart in <30s, zero 409 after restart.
 - 2026-09-22 — Notifier observability + Build-level wiring test
   (fix/notifier-observability): prime/announce INFO logs, tick DEBUG,
   announce-success line; integration test proves Build() wires a working
