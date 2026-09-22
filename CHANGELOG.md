@@ -6,6 +6,10 @@ adapts it to agent-org merges (every entry = one feature branch merged).
 ## [Unreleased]
 
 ### Added
+- 2026-09-22 — Proactive approval notifications (feat/hitl-notify):
+  new pending approvals are pushed to allowlisted Telegram chats within
+  ~5s (announce-once, boot primes as seen, transport-independent,
+  never-decides) (ADR-0006). 3 tests.
 - 2026-09-22 — HITL gate executor + AI-free command replies
   (feat/hitl-executor): `tools.RunGated` (typed outcomes, fail-closed,
   payload-exactly-as-approved) + dispatcher guard so unknown slash-commands

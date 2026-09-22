@@ -75,3 +75,19 @@
 - **Next first step**: store shim (ApprovalLedger for *store.Store) +
   first gated L2 tool (e.g. system restart demo), then live serve test
   with the bot.
+
+## 2026-09-22 (session 7 — approval notifier)
+
+- **Done**: feat/hitl-notify — Notifier (5s poll, announce-once by
+  highest-seen-id, boot-prime, no-chat disable, resilient loop) + app.go
+  wiring + ApprovalSource shim. 3 tests; gates green (92.9%).
+- **Live**: @KyociPersonalBot poll transport verified (user tested
+  /uptime /disk: 12ms/9ms regex_router, zero LLM). 409 conflict root-
+  caused (two instances during smoke), resolved: single boot, zero 409
+  since. Bot commands menu registered via setMyCommands (10 commands).
+  Demo approval #1 seeded for user testing.
+- **Trap learned**: Telegram long-poll holds a server-side slot ~TTL
+  after kill — restart needs a quiet window or 409 persists.
+- **Next first step**: first REAL gated L2 tool via RunGated (store shim
+  for ApprovalLedger), then launchd service (auto-restart, single
+  instance) to retire the manual boot dance.
