@@ -394,7 +394,7 @@ func TestApprovalsCommandLists(t *testing.T) {
 	}}
 	d, inbox, c := newHitlDispatcher(t, ap)
 	d.Process(t.Context(), feed(t, inbox, 9001, "/approvals"))
-	if !strings.Contains(lastSend(c), "#1 system_command") || !strings.Contains(lastSend(c), "/approve 1") {
+	if !strings.Contains(lastSend(c), "#1 · System command") || !strings.Contains(lastSend(c), "Command restart") || !strings.Contains(lastSend(c), "/approve 1") {
 		t.Errorf("approvals text wrong: %q", lastSend(c))
 	}
 }

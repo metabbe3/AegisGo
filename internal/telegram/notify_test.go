@@ -43,7 +43,7 @@ func TestNotifierAnnouncesOnlyNewApprovals(t *testing.T) {
 		t.Fatal("new approval was not announced")
 	}
 	last := lastSend(c)
-	if !contains(last, "#2 system_command") {
+	if !contains(last, "#2 · System command") {
 		t.Errorf("announce text wrong: %q", last)
 	}
 	if len(c.lastButtons) != 1 || len(c.lastButtons[0]) != 2 ||
@@ -91,7 +91,7 @@ func TestNotifierEndToEndGoroutine(t *testing.T) {
 	if c.sendCount() == 0 {
 		t.Fatal("notifier never announced the live approval")
 	}
-	if !contains(lastSend(c), "#1 k2") {
+	if !contains(lastSend(c), "#1 · K2") {
 		t.Errorf("live announce wrong: %q", lastSend(c))
 	}
 }

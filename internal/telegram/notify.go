@@ -151,19 +151,19 @@ func formatApprovalLine(a ApprovalInfo) string {
 	if len(reason) > 80 {
 		reason = reason[:80] + "…"
 	}
-	payload := a.Payload
-	if len(payload) > 120 {
-		payload = payload[:120] + "…"
-	}
 	var b strings.Builder
 	b.WriteString("#")
 	b.WriteString(strconv.FormatInt(a.ID, 10))
-	b.WriteString(" ")
-	b.WriteString(a.Kind)
-	b.WriteString(" — ")
-	b.WriteString(reason)
-	b.WriteString("\n")
-	b.WriteString(payload)
+	b.WriteString(" · ")
+	b.WriteString(humanKind(a.Kind))
+	if reason != "" {
+		b.WriteString("\n")
+		b.WriteString(reason)
+	}
+	if line := renderPayload(a.Payload); line != "" {
+		b.WriteString("\n")
+		b.WriteString(line)
+	}
 	b.WriteString("\n/approve ")
 	b.WriteString(strconv.FormatInt(a.ID, 10))
 	b.WriteString(" · /deny ")

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -124,8 +125,14 @@ func (e *editor) apply(ctx context.Context, ed decisionEdit) {
 	if by == "" {
 		by = "unknown"
 	}
-	text := icon + " #" + strconv.FormatInt(ed.approvalID, 10) + " " + ed.verdict +
-		" by " + by + " · " + ed.at.UTC().Format("15:04 UTC")
+	// Human line, no machine tokens (UX rule 2026-09-22):
+	// "✅ #7 approved by Telegram · 14:13 UTC"
+	who := by
+	if i := strings.Index(who, ":"); i > 0 {
+		who = strings.ToUpper(who[:1]) + who[1:i]
+	}
+	text := icon + " Approval #" + strconv.FormatInt(ed.approvalID, 10) + " " + ed.verdict +
+		" by " + who + " · " + ed.at.UTC().Format("15:04 UTC")
 	for _, t := range targets {
 		if err := e.client.EditMessageText(ctx, t.chatID, t.messageID, text); err != nil {
 			// "message is not modified" and friends are benign races;

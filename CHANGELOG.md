@@ -6,6 +6,13 @@ adapts it to agent-org merges (every entry = one feature branch merged).
 ## [Unreleased]
 
 ### Added
+- 2026-09-22 — Human-readable replies (owner rule): approval pushes,
+  listings, decision edits, and /status labels render as sentences —
+  no raw JSON, no underscores ("Command reload rules", "Router 1101",
+  "✅ Approval #7 approved by Telegram · 14:13 UTC"). Unknown payload
+  shapes degrade gracefully; 5 renderer tests pin it.
+
+### Added
 - 2026-09-22 — /status bot command (P4): one-glance health — uptime,
   total runs, deflection %, per-source counts, rules by state, router
   latency. Degrades honestly when stats aren't wired.
