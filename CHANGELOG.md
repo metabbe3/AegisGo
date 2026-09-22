@@ -6,6 +6,11 @@ adapts it to agent-org merges (every entry = one feature branch merged).
 ## [Unreleased]
 
 ### Added
+- 2026-09-22 — Notifier observability + Build-level wiring test
+  (fix/notifier-observability): prime/announce INFO logs, tick DEBUG,
+  announce-success line; integration test proves Build() wires a working
+  notifier end-to-end (fake Bot API). Root-caused live "silence": v1 race
+  prime-vs-seed + user approving before log check — wiring was correct.
 - 2026-09-22 — Proactive approval notifications (feat/hitl-notify):
   new pending approvals are pushed to allowlisted Telegram chats within
   ~5s (announce-once, boot primes as seen, transport-independent,

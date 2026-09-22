@@ -89,6 +89,7 @@ func (n *Notifier) prime(ctx context.Context) {
 			n.lastSeen = a.ID
 		}
 	}
+	n.logger.Info("telegram: approval notifier primed", "last_seen", n.lastSeen)
 }
 
 func (n *Notifier) tick(ctx context.Context) {
@@ -97,6 +98,7 @@ func (n *Notifier) tick(ctx context.Context) {
 		n.logger.Error("telegram: notifier poll failed", "error", err)
 		return
 	}
+	n.logger.Debug("telegram: notifier tick", "pending", len(pend), "last_seen", n.lastSeen)
 	for _, a := range pend {
 		if a.ID <= n.lastSeen {
 			continue
@@ -115,7 +117,9 @@ func (n *Notifier) announce(ctx context.Context, a ApprovalInfo) {
 			// Log and continue to the next chat; never lose the loop.
 			n.logger.Error("telegram: approval notify failed",
 				"chat_id", chat, "approval_id", a.ID, "error", err)
+			continue
 		}
+		n.logger.Info("telegram: approval notified", "approval_id", a.ID, "chat_id", chat)
 	}
 }
 
