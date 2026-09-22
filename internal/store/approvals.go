@@ -142,3 +142,24 @@ func (s *Store) migrateV4() error {
 	}
 	return tx.Commit()
 }
+
+// migrateV5 adds callback columns to the telegram inbox (inline keyboard
+// presses carry data instead of text).
+func (s *Store) migrateV5() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	stmts := []string{
+		`ALTER TABLE telegram_inbox ADD COLUMN cb_id TEXT`,
+		`ALTER TABLE telegram_inbox ADD COLUMN cb_data TEXT`,
+		`PRAGMA user_version = 5`,
+	}
+	for _, stmt := range stmts {
+		if _, err := tx.Exec(stmt); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("migrating to v5: %w", err)
+		}
+	}
+	return tx.Commit()
+}

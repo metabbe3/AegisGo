@@ -85,8 +85,16 @@ func (d *Dispatcher) Process(ctx context.Context, row InboxRow) {
 		return
 	}
 
-	if strings.TrimSpace(row.Text) == "" {
+	if strings.TrimSpace(row.Text) == "" && row.CallbackData == "" {
 		_ = d.inbox.MarkStatus(ctx, row.UpdateID, InboxSkipped)
+		return
+	}
+
+	// Button presses: callback_data "apr:<id>" / "dny:<id>". Same pending-
+	// only CAS as the text commands, then ack the query (stops the spin
+	// animation) — the outcome lands as the toast + an edited message.
+	if row.CallbackData != "" {
+		d.claimAndSend(ctx, row, d.callbackText(ctx, row))
 		return
 	}
 

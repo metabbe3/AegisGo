@@ -116,3 +116,17 @@
   NOTE (callers kill stale instances explicitly).
 - **Next first step**: first REAL gated L2 tool via RunGated (system
   restart or app-reload demo), then N1 YAML manifest.
+
+## 2026-09-22 (session 10 — approval buttons)
+
+- **Done**: feat/approval-buttons — Update.CallbackQuery shape,
+  SendMessageWithButtons + AnswerCallbackQuery on Client, inbox cb_id/
+  cb_data (migration v5), dispatcher callback path ("apr:<id>"/"dny:<id>"),
+  notifier announces with buttons instead of typed hints. 5 tests; gates
+  green (92.7%).
+- **UX**: press → toast (Processing… → ✅ Approved/🚫 Denied/ℹ️ Nothing
+  changed) + reply line in chat. Text commands still work (buttons are
+  additive, not a replacement).
+- **Next first step**: rebuild + relaunch launchd service, live-test a
+  seeded approval from the owner's phone (button press), then first REAL
+  gated L2 tool.

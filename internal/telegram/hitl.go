@@ -133,3 +133,45 @@ func (d *Dispatcher) knownRouterCommand(text string) bool {
 	}
 	return false
 }
+
+// callbackText handles inline-keyboard presses: "apr:<id>" / "dny:<id>".
+// Answers the callback (toast) and returns the decision line as the reply.
+func (d *Dispatcher) callbackText(ctx context.Context, row InboxRow) string {
+	if d.approver == nil {
+		return "Approvals unavailable (no store wired)."
+	}
+	data := strings.TrimSpace(row.CallbackData)
+	state, idStr, ok := strings.Cut(data, ":")
+	if !ok {
+		return "Bad callback data: " + data
+	}
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || id <= 0 {
+		return "Bad approval id in callback: " + idStr
+	}
+	var want string
+	switch state {
+	case "apr":
+		want = "approved"
+	case "dny":
+		want = "denied"
+	default:
+		return "Unknown callback action: " + state
+	}
+	// Answer the press FIRST (spinner stops even if the decide is slow).
+	if d.client != nil {
+		_ = d.client.AnswerCallbackQuery(ctx, row.CallbackID, "Processing…")
+	}
+	outcome := d.decideOne(ctx, id, want, row)
+	toast := "✅ Approved"
+	if want == "denied" {
+		toast = "🚫 Denied"
+	}
+	if strings.Contains(outcome, "not pending") {
+		toast = "ℹ️ Nothing changed"
+	}
+	if d.client != nil {
+		_ = d.client.AnswerCallbackQuery(ctx, row.CallbackID, toast)
+	}
+	return outcome
+}

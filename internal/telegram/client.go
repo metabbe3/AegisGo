@@ -35,6 +35,11 @@ type Client interface {
 	// GetUpdates long-polls for updates at or after offset (0 = from the
 	// stored high-water mark's next).
 	GetUpdates(ctx context.Context, offset int64, timeout time.Duration) ([]Update, error)
+	// SendMessageWithButtons posts text with an inline keyboard.
+	SendMessageWithButtons(ctx context.Context, chatID int64, text string,
+		buttons [][]Button) (int64, error)
+	// AnswerCallbackQuery acks a button press (stops the spinner).
+	AnswerCallbackQuery(ctx context.Context, callbackID, text string) error
 	// SetWebhook registers the webhook URL with the given secret.
 	SetWebhook(ctx context.Context, url, secret string) error
 	// DeleteWebhook removes the webhook registration.
@@ -44,8 +49,18 @@ type Client interface {
 // Update is the subset of Telegram's Update the dispatcher handles. Only
 // text messages are processed; everything else is ignored cheaply.
 type Update struct {
-	UpdateID int64    `json:"update_id"`
-	Message  *Message `json:"message,omitempty"`
+	UpdateID int64          `json:"update_id"`
+	Message  *Message       `json:"message,omitempty"`
+	Callback *CallbackQuery `json:"callback_query,omitempty"`
+}
+
+// CallbackQuery is the button-press update: the data string the button
+// carried, the message it was attached to, and who pressed it.
+type CallbackQuery struct {
+	ID      string   `json:"id"`
+	From    *User    `json:"from,omitempty"`
+	Message *Message `json:"message,omitempty"`
+	Data    string   `json:"data"`
 }
 
 // Message is the subset of Telegram's Message we need. Note the nested
@@ -165,6 +180,48 @@ func (c *HTTPClient) SendMessage(ctx context.Context, chatID int64, text string,
 		return 0, err
 	}
 	return resp.Result.MessageID, nil
+}
+
+// Button is one inline-keyboard button (UTF-8 emoji in the label are the
+// "icon" — Telegram renders them natively, no asset files needed).
+type Button struct {
+	Label string `json:"text"`
+	Data  string `json:"callback_data"`
+}
+
+type inlineKeyboard struct {
+	Inline [][]Button `json:"inline_keyboard"`
+}
+
+// SendMessageWithButtons posts text plus an inline keyboard (max ~8 buttons
+// per row enforced by callers; Telegram hard-caps 8).
+func (c *HTTPClient) SendMessageWithButtons(ctx context.Context, chatID int64, text string,
+	buttons [][]Button) (int64, error) {
+	in := struct {
+		ChatID         int64         `json:"chat_id"`
+		Text           string        `json:"text"`
+		ReplyMarkup    inlineKeyboard `json:"reply_markup,omitempty"`
+		DisableWebPage bool          `json:"disable_web_page_preview"`
+	}{ChatID: chatID, Text: text, ReplyMarkup: inlineKeyboard{Inline: buttons}, DisableWebPage: true}
+	var resp struct {
+		Result struct {
+			MessageID int64 `json:"message_id"`
+		} `json:"result"`
+	}
+	if err := c.call(ctx, "sendMessage", in, &resp); err != nil {
+		return 0, err
+	}
+	return resp.Result.MessageID, nil
+}
+
+// AnswerCallbackQuery acks the press; text is the little toast on top.
+func (c *HTTPClient) AnswerCallbackQuery(ctx context.Context, callbackID, text string) error {
+	in := struct {
+		ID   string `json:"callback_query_id"`
+		Text string `json:"text,omitempty"`
+	}{ID: callbackID, Text: text}
+	var resp struct{}
+	return c.call(ctx, "answerCallbackQuery", in, &resp)
 }
 
 func (c *HTTPClient) EditMessageText(ctx context.Context, chatID, messageID int64, text string) error {

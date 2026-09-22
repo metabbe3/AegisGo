@@ -43,8 +43,15 @@ func TestNotifierAnnouncesOnlyNewApprovals(t *testing.T) {
 		t.Fatal("new approval was not announced")
 	}
 	last := lastSend(c)
-	if !contains(last, "#2 system_command") || !contains(last, "/approve 2") {
+	if !contains(last, "#2 system_command") {
 		t.Errorf("announce text wrong: %q", last)
+	}
+	if len(c.lastButtons) != 1 || len(c.lastButtons[0]) != 2 ||
+		c.lastButtons[0][0].Data != "apr:2" || c.lastButtons[0][1].Data != "dny:2" {
+		t.Errorf("announce buttons wrong: %+v", c.lastButtons)
+	}
+	if contains(last, "/approve 2") {
+		t.Errorf("text still carries the typed hint — buttons replace it: %q", last)
 	}
 
 	// Same pending row on the next tick → NOT re-announced.

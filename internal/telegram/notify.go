@@ -111,9 +111,18 @@ func (n *Notifier) tick(ctx context.Context) {
 func (n *Notifier) announce(ctx context.Context, a ApprovalInfo) {
 	var b strings.Builder
 	b.WriteString("🔔 Approval needed\n")
-	b.WriteString(formatApprovalLine(a))
+	line := formatApprovalLine(a)
+	// Strip the trailing /approve · /deny hint — the buttons replace it.
+	if i := strings.LastIndex(line, "\n/approve"); i >= 0 {
+		line = line[:i]
+	}
+	b.WriteString(line)
+	buttons := [][]Button{{
+		{Label: "✅ Approve", Data: "apr:" + strconv.FormatInt(a.ID, 10)},
+		{Label: "🚫 Deny", Data: "dny:" + strconv.FormatInt(a.ID, 10)},
+	}}
 	for _, chat := range n.chatIDs {
-		if _, err := n.client.SendMessage(ctx, chat, b.String(), 0); err != nil {
+		if _, err := n.client.SendMessageWithButtons(ctx, chat, b.String(), buttons); err != nil {
 			// Log and continue to the next chat; never lose the loop.
 			n.logger.Error("telegram: approval notify failed",
 				"chat_id", chat, "approval_id", a.ID, "error", err)
