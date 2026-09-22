@@ -81,9 +81,10 @@ func serve(ctx context.Context, tierFlag string) error {
 		Addr: cfg.Addr,
 		Handler: server.Handler(server.Deps{
 			Engine: a.Engine, Answers: a.Store, Readiness: a.Store, Stats: a.Store,
-			Webhook: a.Webhook, // nil unless Telegram runs in webhook mode
-			Tasks:   tasks,
-			Logger:  logger,
+			Webhook:   a.Webhook, // nil unless Telegram runs in webhook mode
+			Approvals: a.Store,   // HITL REST (ADR-0008)
+			Tasks:     tasks,
+			Logger:    logger,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}

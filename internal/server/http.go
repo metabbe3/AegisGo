@@ -60,8 +60,11 @@ type Deps struct {
 	// Tasks tracks async-run goroutines so shutdown can join them (BC5).
 	// nil is fine for tests and embedders that never wait: Handler fills in
 	// a throwaway group.
-	Tasks  *task.Group
-	Logger *slog.Logger
+	Tasks *task.Group
+	// Approvals backs the HITL REST endpoints (ADR-0008); nil = the
+	// endpoints answer 503 rather than 404-ing silently.
+	Approvals ApprovalSource
+	Logger    *slog.Logger
 }
 
 // Handler builds the HTTP routes.
@@ -110,6 +113,22 @@ func Handler(d Deps) http.Handler {
 
 	mux.HandleFunc("GET /v1/answers/{trace}", func(w http.ResponseWriter, r *http.Request) {
 		getAnswer(w, r, d)
+	})
+
+	mux.HandleFunc("GET /v1/approvals", func(w http.ResponseWriter, r *http.Request) {
+		if d.Approvals == nil {
+			writeError(w, http.StatusServiceUnavailable, "approvals not wired")
+			return
+		}
+		listApprovals(w, r, d.Approvals)
+	})
+
+	mux.HandleFunc("POST /v1/approvals/{id}/decision", func(w http.ResponseWriter, r *http.Request) {
+		if d.Approvals == nil {
+			writeError(w, http.StatusServiceUnavailable, "approvals not wired")
+			return
+		}
+		decideApproval(w, r, d.Approvals)
 	})
 
 	if d.Webhook != nil {
