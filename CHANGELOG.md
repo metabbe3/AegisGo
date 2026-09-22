@@ -6,6 +6,10 @@ adapts it to agent-org merges (every entry = one feature branch merged).
 ## [Unreleased]
 
 ### Added
+- 2026-09-22 — Telegram HITL commands (feat/telegram-approvals):
+  /approvals, /approve <id>, /deny <id>, bare /approve = oldest pending.
+  Transport-level (never router rules), pending-only CAS, honest no-op
+  surfacing, nil-store degradation (ADR-0004). 8 dispatcher tests.
 - 2026-09-22 — HITL approval ledger (feat/hitl-gate): `approvals` table
   (migration v4) + store API Create/Get/Decide/Expire/Pending; pending-only
   CAS transitions, idempotent double-decide, TTL sweeper, store never
