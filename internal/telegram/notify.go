@@ -30,6 +30,10 @@ type ApprovalInfo struct {
 
 // Notifier pushes new pending approvals to chats.
 type Notifier struct {
+	// edits records pushed-message targets for decision-time editing
+	// (ADR-0009); nil = editing disabled.
+	edits *EditRegistry
+
 	src      ApprovalSource
 	client   Client
 	chatIDs  []int64
@@ -44,6 +48,9 @@ type Notifier struct {
 
 // NewNotifier builds a notifier. interval <= 0 defaults to 5s.
 // An empty chat list disables it (Start returns immediately).
+// SetEditRegistry attaches the decision-edit registry (ADR-0009).
+func (n *Notifier) SetEditRegistry(r *EditRegistry) { n.edits = r }
+
 func NewNotifier(src ApprovalSource, c Client, chatIDs []int64,
 	interval time.Duration, logger *slog.Logger) *Notifier {
 	if interval <= 0 {
@@ -122,11 +129,17 @@ func (n *Notifier) announce(ctx context.Context, a ApprovalInfo) {
 		{Label: "🚫 Deny", Data: "dny:" + strconv.FormatInt(a.ID, 10)},
 	}}
 	for _, chat := range n.chatIDs {
-		if _, err := n.client.SendMessageWithButtons(ctx, chat, b.String(), buttons); err != nil {
+		msgID, err := n.client.SendMessageWithButtons(ctx, chat, b.String(), buttons)
+		if err != nil {
 			// Log and continue to the next chat; never lose the loop.
 			n.logger.Error("telegram: approval notify failed",
 				"chat_id", chat, "approval_id", a.ID, "error", err)
 			continue
+		}
+		// Remember where the buttons live so the decision can edit this
+		// exact message (ADR-0009).
+		if n.edits != nil {
+			n.edits.Record(a.ID, chat, msgID)
 		}
 		n.logger.Info("telegram: approval notified", "approval_id", a.ID, "chat_id", chat)
 	}
@@ -157,3 +170,10 @@ func formatApprovalLine(a ApprovalInfo) string {
 	b.WriteString(strconv.FormatInt(a.ID, 10))
 	return b.String()
 }
+
+// PrimeForTest primes synchronously (tests need determinism; production
+// primes inside Start).
+func (n *Notifier) PrimeForTest(ctx context.Context) { n.prime(ctx) }
+
+// TickForTest runs one poll pass synchronously.
+func (n *Notifier) TickForTest(ctx context.Context) { n.tick(ctx) }

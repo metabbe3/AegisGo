@@ -39,6 +39,8 @@ type Dispatcher struct {
 	approver approver
 	// gated maps "/name" → L2 action flows (nil = none wired).
 	gated map[string]GatedAction
+	// onDecided fires after a successful decision (edit pushed message).
+	onDecided func(approvalID int64, verdict, by string)
 
 	mu      sync.Mutex
 	buckets map[int64]*chatBucket

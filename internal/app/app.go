@@ -225,10 +225,6 @@ func startTelegram(ctx context.Context, cfg config.Config, eng *engine.Engine,
 			return lines
 		}, logger, st)
 
-	// First REAL gated action: /reload_rules re-reads the rules table and
-	// swaps the live router — only after a human approves (ADR-0007).
-	rg := &ReloadGate{Store: st, Router: rt}
-	dispatcher.RegisterGated(map[string]telegram.GatedAction{"/reload_rules": gatedText{rg}})
 
 	workers := max(1, cfg.TelegramWorkers)
 	// 5s idle cadence: Wake() fires on every enqueue, so the interval only
@@ -245,7 +241,21 @@ func startTelegram(ctx context.Context, cfg config.Config, eng *engine.Engine,
 	// ledger, not the transport. Disabled cleanly when no chats are set.
 	notif := telegram.NewNotifier(&approvalSourceShim{st: st}, client, cfg.TelegramChats,
 		5*time.Second, logger)
+	// Decision editing (ADR-0009): pushed button messages get rewritten
+	// to their final state when decided from ANY path this process sees.
+	editReg := telegram.NewEditRegistry()
+	notif.SetEditRegistry(editReg)
 	go notif.Start(tgCtx)
+
+	// First REAL gated action: /reload_rules re-reads the rules table and
+	// swaps the live router — only after a human approves (ADR-0007).
+	rg := &ReloadGate{Store: st, Router: rt}
+	dispatcher.RegisterGated(map[string]telegram.GatedAction{"/reload_rules": gatedText{rg}})
+
+	// Decision edits: drain queue → EditMessageText on recorded targets.
+	ed := telegram.NewEditor(client, editReg, logger)
+	dispatcher.OnDecided(ed.EnqueueDecided)
+	go ed.Run(tgCtx)
 
 	var webhook http.Handler
 	var poller *telegram.PollLoop
