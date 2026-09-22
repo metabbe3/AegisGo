@@ -42,6 +42,10 @@ jangan hapus histori; item selesai tinggal diberi tanggal.
 
 ## Done (2026-09-22)
 
+- [x] Semua branch → main (13 feat/fix/docs/chore lokal + 1 remote
+  upstream refactor/simplify-pass; e2e 10 PASS + S11 SKIP ollama
+  known; single-binary `aegis serve`, plist updated)
+
 - [x] First gated L2 action /reload_rules (ADR-0007, feat/first-gated-tool)
 
 - [x] docs foundation + SDLC (34255ca)

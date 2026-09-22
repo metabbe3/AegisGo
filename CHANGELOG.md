@@ -6,6 +6,9 @@ adapts it to agent-org merges (every entry = one feature branch merged).
 ## [Unreleased]
 
 ### Added
+- 2026-09-22 — Merged ALL branches incl. upstream refactor/simplify-pass
+  (13 Sep): e2e 13-stage, pathutil coverage, poll goroutine fixes,
+  single-binary consolidation (aegis serve) — plist + deploy migrated.
 - 2026-09-22 — First gated L2 action /reload_rules (ADR-0007):
   ReloadGate (app layer) + telegram.GatedAction interface; command →
   approval → ✅/🚫 buttons → execute-on-approve; deny/timeout keeps

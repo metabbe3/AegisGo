@@ -104,3 +104,25 @@ kecil, seperti test lainnya.
 **Aturan:** Fake harus meniru kontrak, bukan mempermudah asersi. Kalau
 test butuh "keadaan sudah terjadi", simulasi jalur yang menghasilkannya
 — jangan injeksi langsung yang menabrak kontrak.
+
+## LL-007 · 2026-09-22 · Merge upstream (refactor/simplify-pass)
+
+**Gejala:** Branch remote 13 Sep (refactor/simplify-pass) belum merged;
+merge menabrak 3 konflik + binary entrypoint berubah total
+(cmd/aegis-serve → single `aegis` + subcommand `serve`), launchd plist
+masih nunjuk path lama.
+
+**Akar masalah:** Garis upstream 9 hari lebih tua mengandung
+konsolidasi besar (e2e 13-stage, single binary, internal/cli) yang
+menyusul fitur kita di file yang sama (store.go migrasi chain,
+dispatcher signature, systemtool helpers).
+
+**Fix:** Resolve penuh sisi HEAD untuk 3 konflik; pulihkan ekor
+migrateV1 yang terpotong + migrateV2/V3 dari git show; buang import
+logx sisa; rebuild sebagai ./cmd/aegis; plist diberi arg `serve`;
+kickstart → healthz ok, notifier primed.
+
+**Aturan:** Sebelum merge branch lama: (1) diff --stat dulu, (2) cek
+entrypoint/build target masih ada pasca-merge, (3) infra yang menunjuk
+binary (plist/systemd) ikut dicek — "build hijau" tidak otomatis
+"deploy benar".
