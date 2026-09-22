@@ -198,10 +198,10 @@ type inlineKeyboard struct {
 func (c *HTTPClient) SendMessageWithButtons(ctx context.Context, chatID int64, text string,
 	buttons [][]Button) (int64, error) {
 	in := struct {
-		ChatID         int64         `json:"chat_id"`
-		Text           string        `json:"text"`
+		ChatID         int64          `json:"chat_id"`
+		Text           string         `json:"text"`
 		ReplyMarkup    inlineKeyboard `json:"reply_markup,omitempty"`
-		DisableWebPage bool          `json:"disable_web_page_preview"`
+		DisableWebPage bool           `json:"disable_web_page_preview"`
 	}{ChatID: chatID, Text: text, ReplyMarkup: inlineKeyboard{Inline: buttons}, DisableWebPage: true}
 	var resp struct {
 		Result struct {

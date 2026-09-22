@@ -192,6 +192,11 @@ func startTelegram(ctx context.Context, cfg config.Config, eng *engine.Engine,
 			return lines
 		}, logger, st)
 
+	// First REAL gated action: /reload_rules re-reads the rules table and
+	// swaps the live router — only after a human approves (ADR-0007).
+	rg := &ReloadGate{Store: st, Router: rt}
+	dispatcher.RegisterGated(map[string]telegram.GatedAction{"/reload_rules": gatedText{rg}})
+
 	workers := max(1, cfg.TelegramWorkers)
 	pool := telegram.NewWorkerPool(inbox, workers, time.Second, dispatcher.Process, logger)
 
