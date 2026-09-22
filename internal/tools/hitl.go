@@ -21,10 +21,10 @@ type ApprovalLedger interface {
 
 // ApprovalRow is the ledger's row shape (mirrors store.Approval).
 type ApprovalRow struct {
-	ID     int64
-	Kind   string
+	ID      int64
+	Kind    string
 	Payload string
-	State  string // pending | approved | denied | expired
+	State   string // pending | approved | denied | expired
 }
 
 // GateConfig tunes one HITL gate.
