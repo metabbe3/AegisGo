@@ -241,7 +241,11 @@ func (c *HTTPClient) GetUpdates(ctx context.Context, offset int64, timeout time.
 		Offset         int64    `json:"offset,omitempty"`
 		Timeout        int      `json:"timeout"`
 		AllowedUpdates []string `json:"allowed_updates"`
-	}{Offset: offset, Timeout: int(timeout.Seconds()), AllowedUpdates: []string{"message"}}
+	}{Offset: offset, Timeout: int(timeout.Seconds()),
+		// BOTH update kinds: message (text) and callback_query (inline
+		// button presses). Without callback_query here, Telegram never
+		// delivers button presses at all — found live 2026-09-22 (LL-008).
+		AllowedUpdates: []string{"message", "callback_query"}}
 	var resp struct {
 		Result []Update `json:"result"`
 	}
@@ -256,7 +260,7 @@ func (c *HTTPClient) SetWebhook(ctx context.Context, url, secret string) error {
 		URL            string   `json:"url"`
 		SecretToken    string   `json:"secret_token,omitempty"`
 		AllowedUpdates []string `json:"allowed_updates"`
-	}{URL: url, SecretToken: secret, AllowedUpdates: []string{"message"}}
+	}{URL: url, SecretToken: secret, AllowedUpdates: []string{"message", "callback_query"}}
 	return c.call(ctx, "setWebhook", in, nil)
 }
 

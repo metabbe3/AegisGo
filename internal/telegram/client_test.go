@@ -429,3 +429,30 @@ func TestAnswerCallbackQuery(t *testing.T) {
 		t.Fatalf("answerCallbackQuery bodies = %v", bodies)
 	}
 }
+
+// LL-008 pin: getUpdates MUST subscribe to callback_query too — button
+// presses silently never arrive otherwise. This test fails on the bug.
+func TestGetUpdatesSubscribesCallbackQuery(t *testing.T) {
+	api := newFakeBotAPI(t)
+	c := api.client()
+	ctx := context.Background()
+	if _, err := c.GetUpdates(ctx, 0, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	bodies := api.bodies("getUpdates")
+	if len(bodies) == 0 {
+		t.Fatal("no getUpdates call recorded")
+	}
+	got, _ := bodies[len(bodies)-1]["allowed_updates"].([]any)
+	has := func(kind string) bool {
+		for _, k := range got {
+			if s, ok := k.(string); ok && s == kind {
+				return true
+			}
+		}
+		return false
+	}
+	if !has("message") || !has("callback_query") {
+		t.Fatalf("allowed_updates = %v (need message AND callback_query)", got)
+	}
+}

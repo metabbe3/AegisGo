@@ -126,3 +126,22 @@ kickstart → healthz ok, notifier primed.
 entrypoint/build target masih ada pasca-merge, (3) infra yang menunjuk
 binary (plist/systemd) ikut dicek — "build hijau" tidak otomatis
 "deploy benar".
+
+## LL-008 · 2026-09-22 · Tombol inline "nothing happened" (P0 owner-report)
+
+**Gejala:** Approval push + tombol ✅/🚫 terkirim, tap → tidak ada
+toast, tidak ada keputusan. Owner report; log 0 callback.
+
+**Akar masalah:** getUpdates/SetWebhook kirim
+`allowed_updates: ["message"]` — Telegram TIDAK mengirim
+callback_query ke bot yang tidak mensubscribe jenis update itu.
+Dispatcher/inbox/editor semua benar; event-nya tidak pernah sampai.
+
+**Fix:** allowed_updates = ["message","callback_query"] di kedua
+transport (long-poll + webhook). Test pinned
+(TestGetUpdatesSubscribesCallbackQuery) — gagal pada bug, hijau pada
+fix.
+
+**Aturan:** integrasi eksternal diuji dari EVENT ASLI (live) sebelum
+dinyatakan selesai; unit test dengan feed sintetis tidak membuktikan
+subscription. "UI-nya ada" ≠ "event-nya sampai".
