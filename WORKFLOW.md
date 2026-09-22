@@ -247,3 +247,36 @@ Decisions are pending-only: re-deciding an already-approved/denied/expired
 row is a reported no-op, never an error or a state flip. The transport
 never executes the action — an approved executor re-validates policy at
 run time (fail-closed).
+
+### Three decision paths, one ledger (ADR-0004/0006/0008)
+
+1. **Inline buttons** — new approvals are PUSHED to allowlisted chats with
+   ✅ Approve / 🚫 Deny buttons (toast feedback per outcome). This is the
+   default UX; no typing needed.
+2. **Typed commands** — the `/approve` `/deny` above still work (buttons
+   are additive).
+3. **REST** — for scripts/CLI:
+
+```
+curl localhost:8080/v1/approvals
+curl -X POST localhost:8080/v1/approvals/3/decision \
+  -d '{"decision":"approve","by":"deploy-script"}'
+```
+
+Whichever path decides first wins the CAS; the others get an honest
+409/no-op with the current row.
+
+### First gated action: /reload_rules (ADR-0007)
+
+`/reload_rules` in an allowlisted chat runs the full L2 loop: approval
+row → button push → 10-minute wait → execute ONLY on approve (re-read
+rules table, swap live router). Deny/timeout keeps the previous rules —
+worst case is "nothing changed", reported honestly.
+
+### Run as a service (macOS launchd)
+
+`scripts/install-launchd.sh` installs `com.aegisgo.serve` (RunAtLoad +
+KeepAlive + 30s throttle; binary at `~/.hermes/bin`, token stays in the
+env file outside the repo). Verified: kill → auto-restart <30s, single
+poller (no Telegram 409). On Linux use your systemd unit of choice —
+the binary is the same.

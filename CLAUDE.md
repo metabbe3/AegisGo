@@ -39,9 +39,9 @@ internal/tools           common Tool interface + read_csv, csv_stats, read_doc,
                          manager, job_status polling, SSRF-guarded)
 internal/store           embedded SQLite: audit trail, rules table, fallback corpus,
                          async answers; single-writer batcher
-internal/server          REST: /healthz /readyz /v1/agent/run (sync|?async=1|?stream=1 SSE) /v1/answers/{id} /v1/stats, optional webhook mount
+internal/server          REST: /healthz /readyz /v1/agent/run (sync|?async=1|?stream=1 SSE) /v1/answers/{id} /v1/stats /v1/approvals + POST /v1/approvals/{id}/decision (HITL, ADR-0008), optional webhook mount
 internal/grpcapi         gRPC surface over the same engine (internal/pb holds the committed proto stubs)
-internal/telegram        Telegram interface: stdlib Bot API client, dispatcher, durable inbox, webhook + long-poll transports
+internal/telegram        Telegram interface: stdlib Bot API client, dispatcher, durable inbox, webhook + long-poll transports; HITL: durable inbox, ✅/🚫 approval buttons (ADR-0006), proactive notifier (ADR-0006), gated /reload_rules (ADR-0007)
 internal/miner           fallback corpus → shadow rules (pattern synthesis, dominance threshold)
 internal/mcpclient       mark3labs/mcp-go client + adapter to framework tools
 internal/provider        env-switched agent factory (openai | openai-compat | anthropic | foundry)
