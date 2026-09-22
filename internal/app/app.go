@@ -271,7 +271,9 @@ func startTelegram(ctx context.Context, cfg config.Config, eng *engine.Engine,
 
 	// First REAL gated action: /reload_rules re-reads the rules table and
 	// swaps the live router — only after a human approves (ADR-0007).
-	rg := &ReloadGate{Store: st, Router: rt}
+	// The diff variant embeds the old→new rule changes in the approval
+	// reason: approve what you SEE (ADR-0011).
+	rg := &ReloadDiffGate{ReloadGate: &ReloadGate{Store: st, Router: rt}}
 	dispatcher.RegisterGated(map[string]telegram.GatedAction{"/reload_rules": gatedText{rg}})
 
 	// /status + /history share the store REST already serves.
