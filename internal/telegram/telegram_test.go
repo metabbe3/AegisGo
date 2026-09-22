@@ -25,6 +25,9 @@ type fakeClient struct {
 	// getUpdatesErr is one-shot: the first GetUpdates call fails with it
 	// (a transient API error), later calls return updates normally.
 	getUpdatesErr error
+
+	// lastButtons captures the most recent inline keyboard (nil = none).
+	lastButtons [][]Button
 }
 
 func (f *fakeClient) GetMe(context.Context) (string, error) { return "aegis_test_bot", nil }
@@ -73,6 +76,23 @@ func (f *fakeClient) GetUpdates(_ context.Context, offset int64, _ time.Duration
 	}
 	return out, nil
 }
+func (f *fakeClient) SendMessageWithButtons(_ context.Context, _ int64, text string, buttons [][]Button) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.sendErr != nil {
+		return 0, f.sendErr
+	}
+	f.sends = append(f.sends, text)
+	if f.nextMsgID == 0 {
+		f.nextMsgID = 100
+	}
+	f.nextMsgID++
+	f.lastButtons = buttons
+	return f.nextMsgID, nil
+}
+
+func (f *fakeClient) AnswerCallbackQuery(_ context.Context, _, _ string) error { return nil }
+
 func (f *fakeClient) SetWebhook(context.Context, string, string) error { return nil }
 func (f *fakeClient) DeleteWebhook(context.Context) error              { return nil }
 

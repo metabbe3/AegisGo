@@ -476,3 +476,48 @@ func TestUnknownSlashCommandNeverHitsEngine(t *testing.T) {
 		t.Errorf("unknown-command reply wrong: %q", body)
 	}
 }
+
+// feedCallback inserts a button-press update and returns its inbox row.
+func feedCallback(t *testing.T, inbox *Inbox, updateID int64, data string) InboxRow {
+	t.Helper()
+	u := Update{UpdateID: updateID,
+		Callback: &CallbackQuery{ID: "cbq", Data: data,
+			Message: &Message{MessageID: updateID * 10, Chat: Chat{ID: chatOK}}}}
+	if _, err := inbox.Enqueue(context.Background(), u); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := inbox.Pending(context.Background(), 1)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("pending: %v (%d)", err, len(rows))
+	}
+	return rows[0]
+}
+
+func TestCallbackApproveButton(t *testing.T) {
+	ap := &fakeApprover{pending: []store.Approval{{ID: 6, Kind: "k", Payload: "{}", Reason: "r"}}}
+	d, inbox, c := newHitlDispatcher(t, ap)
+	d.Process(t.Context(), feedCallback(t, inbox, 9100, "apr:6"))
+	if !strings.Contains(lastSend(c), "#6 approved") {
+		t.Errorf("callback approve reply wrong: %q", lastSend(c))
+	}
+	if ap.decided[6] != "approved" {
+		t.Errorf("decided = %v, want approved", ap.decided)
+	}
+}
+
+func TestCallbackDenyButton(t *testing.T) {
+	ap := &fakeApprover{pending: []store.Approval{{ID: 7, Kind: "k", Payload: "{}", Reason: "r"}}}
+	d, inbox, c := newHitlDispatcher(t, ap)
+	d.Process(t.Context(), feedCallback(t, inbox, 9101, "dny:7"))
+	if !strings.Contains(lastSend(c), "#7 denied") {
+		t.Errorf("callback deny reply wrong: %q", lastSend(c))
+	}
+}
+
+func TestCallbackBadData(t *testing.T) {
+	d, inbox, c := newHitlDispatcher(t, &fakeApprover{})
+	d.Process(t.Context(), feedCallback(t, inbox, 9102, "junk"))
+	if !strings.Contains(lastSend(c), "Bad callback data") {
+		t.Errorf("bad data reply wrong: %q", lastSend(c))
+	}
+}

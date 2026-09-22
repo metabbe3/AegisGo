@@ -48,10 +48,10 @@ func (i *Inbox) Enqueue(ctx context.Context, u Update) (bool, error) {
 		text = u.Message.Text
 	}
 	res, err := i.store.ExecResult(ctx,
-		`INSERT OR IGNORE INTO telegram_inbox (update_id, chat_id, text, status, received_ts)
-		 VALUES (?,?,?,?,?)`,
+		`INSERT OR IGNORE INTO telegram_inbox (update_id, chat_id, text, status, received_ts, cb_id, cb_data)
+		 VALUES (?,?,?,?,?,?,?)`,
 		u.UpdateID, chatIDOf(u), text, InboxPending,
-		time.Now().UTC().Format(time.RFC3339Nano))
+		time.Now().UTC().Format(time.RFC3339Nano), callbackIDOf(u), callbackDataOf(u))
 	if err != nil {
 		return false, err
 	}
@@ -62,13 +62,16 @@ func (i *Inbox) Enqueue(ctx context.Context, u Update) (bool, error) {
 	return n == 1, nil
 }
 
-// InboxRow is a leased work item.
+// InboxRow is a leased work item. For button presses Text is empty and
+// CallbackData carries the button payload instead.
 type InboxRow struct {
-	UpdateID int64
-	ChatID   int64
-	Text     string
-	Status   string
-	Replied  bool
+	UpdateID     int64
+	ChatID       int64
+	Text         string
+	Status       string
+	Replied      bool
+	CallbackID   string
+	CallbackData string
 }
 
 // Pending lists up to n pending rows oldest-first. Simple SELECT (no lease
@@ -76,8 +79,8 @@ type InboxRow struct {
 // stays the crash-recovery record, not the lock manager.
 func (i *Inbox) Pending(ctx context.Context, n int) ([]InboxRow, error) {
 	rows, err := i.store.Query(ctx,
-		`SELECT update_id, chat_id, text, status FROM telegram_inbox
-		 WHERE status=? ORDER BY update_id LIMIT ?`, InboxPending, n)
+		`SELECT update_id, chat_id, text, status, COALESCE(cb_id,''), COALESCE(cb_data,'')
+		 FROM telegram_inbox WHERE status=? ORDER BY update_id LIMIT ?`, InboxPending, n)
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +88,7 @@ func (i *Inbox) Pending(ctx context.Context, n int) ([]InboxRow, error) {
 	var out []InboxRow
 	for rows.Next() {
 		var r InboxRow
-		if err := rows.Scan(&r.UpdateID, &r.ChatID, &r.Text, &r.Status); err != nil {
+		if err := rows.Scan(&r.UpdateID, &r.ChatID, &r.Text, &r.Status, &r.CallbackID, &r.CallbackData); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -263,5 +266,24 @@ func chatIDOf(u Update) int64 {
 	if u.Message != nil {
 		return u.Message.ChatID()
 	}
+	if u.Callback != nil && u.Callback.Message != nil {
+		return u.Callback.Message.ChatID()
+	}
 	return 0
+}
+
+// callbackIDOf is the query id to answer (empty for plain messages).
+func callbackIDOf(u Update) string {
+	if u.Callback != nil {
+		return u.Callback.ID
+	}
+	return ""
+}
+
+// callbackDataOf is the button payload (empty for plain messages).
+func callbackDataOf(u Update) string {
+	if u.Callback != nil {
+		return u.Callback.Data
+	}
+	return ""
 }

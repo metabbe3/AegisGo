@@ -6,6 +6,11 @@ adapts it to agent-org merges (every entry = one feature branch merged).
 ## [Unreleased]
 
 ### Added
+- 2026-09-22 — Interactive approval buttons (feat/approval-buttons):
+  notifier now sends ✅ Approve / 🚫 Deny inline keyboards; presses flow
+  through the same inbox (cb_id/cb_data columns, migration v5) and the
+  same pending-only CAS — answerCallbackQuery toast, typed fallback for
+  every failure mode. 5 new tests.
 - 2026-09-22 — launchd service (chore/launchd-service):
   scripts/install-launchd.sh installs aegis-serve as com.aegisgo.serve
   (RunAtLoad + KeepAlive + 30s throttle; binary at ~/.hermes/bin; token

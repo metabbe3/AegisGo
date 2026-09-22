@@ -383,3 +383,49 @@ func TestCallTruncatedResponse(t *testing.T) {
 		t.Errorf("err = %v, want a read failure wrapping the method", err)
 	}
 }
+
+func TestSendMessageWithButtonsPayload(t *testing.T) {
+	api := newFakeBotAPI(t)
+	c := api.client()
+	ctx := context.Background()
+
+	buttons := [][]Button{{
+		{Label: "✅ Approve", Data: "apr:2"},
+		{Label: "🚫 Deny", Data: "dny:2"},
+	}}
+	if _, err := c.SendMessageWithButtons(ctx, chatOK, "🔔 Approval needed", buttons); err != nil {
+		t.Fatal(err)
+	}
+	bodies := api.bodies("sendMessage")
+	if len(bodies) != 1 {
+		t.Fatalf("sendMessage calls = %d, want 1", len(bodies))
+	}
+	markup, ok := bodies[0]["reply_markup"].(map[string]any)
+	if !ok {
+		t.Fatalf("reply_markup missing/wrong: %v", bodies[0]["reply_markup"])
+	}
+	rows, _ := markup["inline_keyboard"].([]any)
+	if len(rows) != 1 {
+		t.Fatalf("inline rows = %d, want 1", len(rows))
+	}
+	first, _ := rows[0].([]any)
+	if len(first) != 2 {
+		t.Fatalf("buttons in row = %d, want 2", len(first))
+	}
+	b0, _ := first[0].(map[string]any)
+	if b0["text"] != "✅ Approve" || b0["callback_data"] != "apr:2" {
+		t.Errorf("first button = %v", b0)
+	}
+}
+
+func TestAnswerCallbackQuery(t *testing.T) {
+	api := newFakeBotAPI(t)
+	c := api.client()
+	if err := c.AnswerCallbackQuery(context.Background(), "cbq1", "✅ Approved"); err != nil {
+		t.Fatal(err)
+	}
+	bodies := api.bodies("answerCallbackQuery")
+	if len(bodies) != 1 || bodies[0]["callback_query_id"] != "cbq1" {
+		t.Fatalf("answerCallbackQuery bodies = %v", bodies)
+	}
+}
