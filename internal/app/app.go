@@ -225,7 +225,6 @@ func startTelegram(ctx context.Context, cfg config.Config, eng *engine.Engine,
 			return lines
 		}, logger, st)
 
-
 	workers := max(1, cfg.TelegramWorkers)
 	// 5s idle cadence: Wake() fires on every enqueue, so the interval only
 	// governs how often an idle worker re-checks the inbox (crash recovery

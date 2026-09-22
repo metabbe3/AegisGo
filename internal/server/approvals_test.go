@@ -32,7 +32,9 @@ func TestListApprovalsEmpty(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("code = %d", rec.Code)
 	}
-	var body struct{ Count int `json:"count"` }
+	var body struct {
+		Count int `json:"count"`
+	}
 	json.NewDecoder(rec.Body).Decode(&body)
 	if body.Count != 0 {
 		t.Fatalf("count = %d", body.Count)

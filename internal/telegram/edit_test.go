@@ -22,13 +22,13 @@ func (f *fakeEditClient) SendMessageWithButtons(_ context.Context, _ int64, text
 	return 42, nil
 }
 func (f *fakeEditClient) AnswerCallbackQuery(context.Context, string, string) error { return nil }
-func (f *fakeEditClient) GetMe(context.Context) (string, error)          { return "bot", nil }
+func (f *fakeEditClient) GetMe(context.Context) (string, error)                     { return "bot", nil }
 func (f *fakeEditClient) GetUpdates(context.Context, int64, time.Duration) ([]Update, error) {
 	return nil, nil
 }
-func (f *fakeEditClient) SetWebhook(context.Context, string, string) error    { return nil }
-func (f *fakeEditClient) DeleteWebhook(context.Context) error                 { return nil }
-func (f *fakeEditClient) SendMessageButtonsStub()                             {}
+func (f *fakeEditClient) SetWebhook(context.Context, string, string) error { return nil }
+func (f *fakeEditClient) DeleteWebhook(context.Context) error              { return nil }
+func (f *fakeEditClient) SendMessageButtonsStub()                          {}
 func (f *fakeEditClient) EditMessageText(_ context.Context, _, _ int64, text string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
