@@ -520,3 +520,30 @@ func TestCallbackBadData(t *testing.T) {
 		t.Errorf("bad data reply wrong: %q", lastSend(c))
 	}
 }
+
+// /status happy path: uptime line + stats from the store snapshot.
+func TestStatusCommand(t *testing.T) {
+	c := &fakeClient{}
+	d, inbox, st := dispatcherWithStore(t, fakeEngine{answer: "x"}, c,
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+	d.SetStats(st)
+	d.Process(t.Context(), feed(t, inbox, 9103, "/status"))
+	got := lastSend(c)
+	if !strings.Contains(got, "uptime") || !strings.Contains(got, "runs") {
+		t.Fatalf("/status reply = %q", got)
+	}
+	if !strings.Contains(got, "🩺") {
+		t.Fatalf("missing status header: %q", got)
+	}
+}
+
+// /status without stats wired degrades honestly.
+func TestStatusNoStats(t *testing.T) {
+	d, inbox, c := newHitlDispatcher(t, &fakeApprover{})
+	d.SetStats(nil)
+	d.Process(t.Context(), feed(t, inbox, 9104, "/status"))
+	got := lastSend(c)
+	if !strings.Contains(got, "stats unavailable") {
+		t.Fatalf("want stats unavailable, got %q", got)
+	}
+}

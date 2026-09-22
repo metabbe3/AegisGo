@@ -39,6 +39,10 @@ type Dispatcher struct {
 	approver approver
 	// gated maps "/name" → L2 action flows (nil = none wired).
 	gated map[string]GatedAction
+	// stats backs /status (nil = command reports unavailable).
+	stats statser
+	// startedAt anchors the /status uptime line.
+	startedAt time.Time
 	// onDecided fires after a successful decision (edit pushed message).
 	onDecided func(approvalID int64, verdict, by string)
 
@@ -66,13 +70,14 @@ func NewDispatcher(e engineRunner, c Client, inbox *Inbox,
 		logger = slog.Default()
 	}
 	allow := make(map[int64]bool, len(allowChats))
+	d := &Dispatcher{startedAt: time.Now()}
 	for _, id := range allowChats {
 		allow[id] = true
 	}
 	return &Dispatcher{
 		engine: e, client: c, inbox: inbox, allow: allow,
 		rules: rules, logger: logger, buckets: make(map[int64]*chatBucket),
-		approver: ap,
+		approver: ap, startedAt: d.startedAt,
 	}
 }
 
@@ -111,6 +116,9 @@ func (d *Dispatcher) Process(ctx context.Context, row InboxRow) {
 		return
 	case "/approvals":
 		d.claimAndSend(ctx, row, d.approvalsText(ctx))
+		return
+	case "/status":
+		d.claimAndSend(ctx, row, d.statusText(ctx))
 		return
 	case "/deny":
 		d.claimAndSend(ctx, row, d.decideText(ctx, row, "denied"))
@@ -255,7 +263,7 @@ func (d *Dispatcher) helpText() string {
 		"Router commands answer instantly and free: /uptime /disk /memory /hostname /kernel /who\n" +
 		"/csv_summary <path> · /csv_head <path> [rows]\n" +
 		"/rules lists every active rule.\n" +
-		"HITL: /approvals lists pending · /approve <id> · /deny <id> (bare /approve decides the oldest).\n/reload_rules — L2 action: hot-reload router rules after approval (✅/🚫 buttons).\n" +
+		"HITL: /approvals lists pending · /approve <id> · /deny <id> (bare /approve decides the oldest).\n/status — one-glance health: runs, deflection, latency, rules.\n/reload_rules — L2 action: hot-reload router rules after approval (✅/🚫 buttons).\n" +
 		"Anything else goes to the LLM (if enabled)."
 }
 
@@ -269,6 +277,14 @@ func (d *Dispatcher) rulesText() string {
 	}
 	return "Active rules:\n" + strings.Join(lines, "\n")
 }
+
+// statser is the stats slice /status needs (the store already
+// implements it — stats.Snapshot via store.Stats).
+type statser interface {
+	Stats(ctx context.Context) (*store.StatsSnapshot, error)
+}
+
+var _ statser = (*store.Store)(nil)
 
 // chatBucket is a tiny token bucket: burst 3, refill 1/s.
 type chatBucket struct {
@@ -320,4 +336,44 @@ func (d *Dispatcher) waitChat(ctx context.Context, chatID int64) error {
 // seconds converts a fractional second count to a Duration.
 func seconds(f float64) time.Duration {
 	return time.Duration(f * float64(time.Second))
+}
+
+// statusText renders /status: uptime + one-glance health from the stats
+// snapshot (P4 item). Plain lines, no tables — Telegram-friendly.
+func (d *Dispatcher) statusText(ctx context.Context) string {
+	up := time.Since(d.startedAt).Round(time.Second)
+	var b strings.Builder
+	fmt.Fprintf(&b, "🩺 AegisGo status\nuptime %s\n", up)
+	if d.stats == nil {
+		b.WriteString("stats unavailable")
+		return b.String()
+	}
+	snap, err := d.stats.Stats(ctx)
+	if err != nil {
+		b.WriteString("stats error: " + err.Error())
+		return b.String()
+	}
+	fmt.Fprintf(&b, "runs %d · deflection %.1f%%\n", snap.TotalRuns, snap.DeflectionRate*100)
+	if len(snap.BySource) > 0 {
+		parts := make([]string, 0, len(snap.BySource))
+		for _, src := range []string{"regex_router", "llm_classifier", "llm", "llm_disabled", "error"} {
+			if n, ok := snap.BySource[src]; ok {
+				parts = append(parts, fmt.Sprintf("%s %d", src, n))
+			}
+		}
+		b.WriteString(strings.Join(parts, " · ") + "\n")
+	}
+	if len(snap.RulesByState) > 0 {
+		parts := make([]string, 0, len(snap.RulesByState))
+		for _, st := range []string{"seed", "active", "mined", "shadow"} {
+			if n, ok := snap.RulesByState[st]; ok {
+				parts = append(parts, fmt.Sprintf("%s %d", st, n))
+			}
+		}
+		b.WriteString("rules: " + strings.Join(parts, " · ") + "\n")
+	}
+	if avg, ok := snap.AvgLatencyMS["regex_router"]; ok {
+		fmt.Fprintf(&b, "router latency %dms\n", avg)
+	}
+	return b.String()
 }
