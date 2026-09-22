@@ -125,6 +125,15 @@ func (d *Dispatcher) Process(ctx context.Context, row InboxRow) {
 		}
 	}
 
+	// Unknown slash-commands NEVER reach the LLM (owner rule 22 Sep: replies
+	// and listings must be AI-free). Known router commands (from the rules
+	// listing) fall through to the engine and answer via their rule; anything
+	// else gets the deterministic help text instead of a fallback call.
+	if strings.HasPrefix(row.Text, "/") && !d.knownRouterCommand(row.Text) {
+		d.claimAndSend(ctx, row, d.unknownCommandText(row.Text))
+		return
+	}
+
 	// Idempotency first: claim the reply atomically. A redelivery, a second
 	// worker, or a post-crash replay all lose the race here and stop.
 	claimed, err := d.inbox.ClaimReply(ctx, row.UpdateID)

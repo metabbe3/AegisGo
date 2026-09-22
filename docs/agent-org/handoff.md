@@ -58,3 +58,20 @@
   logprob-confidence POC until a real decision point needs it.
 - **Next first step**: L2 executor loop (engine side): tool run hits L2 →
   CreateApproval → poll DecideApproval → execute after policy re-check.
+
+## 2026-09-22 (session 6 — HITL executor + AI-free replies)
+
+- **Done**: feat/hitl-executor — tools.RunGated with typed GateOutcome
+  (approved/denied/expired/timeout/shutdown), fail-closed semantics,
+  7 tests; AI-free guard for unknown slash-commands (test drives it);
+  regression caught & fixed (guard swallowed /uptime — scoped via rules
+  listing). Gates green, coverage 93.1%.
+- **Trap learned**: transport-level guards must consult the live rules
+  listing or they eat real commands; test helpers must wire realistic
+  rules (nil ≠ production).
+- **Live infra**: bot token @KyociPersonalBot validated (getMe OK),
+  stored at ~/.hermes/data/aegisgo-growth/aegisgo.env (0600, outside
+  repo), poll mode, allowlist = owner chat. Serve smoke pending.
+- **Next first step**: store shim (ApprovalLedger for *store.Store) +
+  first gated L2 tool (e.g. system restart demo), then live serve test
+  with the bot.

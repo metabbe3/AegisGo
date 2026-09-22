@@ -99,3 +99,37 @@ func (d *Dispatcher) decideOne(ctx context.Context, id int64, state string, row 
 
 // compile-time: the interface is satisfied by *store.Store.
 var _ approver = (*store.Store)(nil)
+
+// unknownCommandText answers unrecognized slash-commands deterministically
+// (no LLM): acknowledge, show help, keep it short.
+func (d *Dispatcher) unknownCommandText(cmd string) string {
+	c := cmd
+	if len(c) > 40 {
+		c = c[:40] + "…"
+	}
+	return "Unknown command " + c + "\n\n" + d.helpText()
+}
+
+// knownRouterCommand reports whether a slash-command matches a live router
+// rule (from the /rules listing the app wires in). Used to keep the
+// AI-free guard from swallowing real commands like /uptime.
+func (d *Dispatcher) knownRouterCommand(text string) bool {
+	if d.rules == nil {
+		// No listing wired: fall back to conservative behavior — pass
+		// through to the engine (a rule miss then answers via the engine's
+		// own deterministic path; with the LLM off nothing is spent).
+		return true
+	}
+	cmd := strings.TrimSpace(strings.SplitN(text, " ", 2)[0])
+	for _, line := range d.rules() {
+		// listing format: "name → pattern → tool"
+		parts := strings.Split(line, " → ")
+		if len(parts) != 3 {
+			continue
+		}
+		if strings.HasPrefix(parts[1], cmd) {
+			return true
+		}
+	}
+	return false
+}
