@@ -37,6 +37,8 @@ type Dispatcher struct {
 	logger *slog.Logger
 	// approver backs the HITL commands; nil disables them.
 	approver approver
+	// gated maps "/name" → L2 action flows (nil = none wired).
+	gated map[string]GatedAction
 
 	mu      sync.Mutex
 	buckets map[int64]*chatBucket
@@ -131,6 +133,15 @@ func (d *Dispatcher) Process(ctx context.Context, row InboxRow) {
 			d.claimAndSend(ctx, row, d.decideIDText(ctx, row, state, rest))
 			return
 		}
+	}
+
+	// Gated L2 actions ("/reload_rules"): create approval + wait + run on
+	// approve (ADR-0007). The reply reports the typed outcome — honest for
+	// every branch, including timeout and deny.
+	cmd0 := strings.TrimSpace(strings.SplitN(row.Text, " ", 2)[0])
+	if ga, ok := d.gated[cmd0]; ok {
+		d.claimAndSend(ctx, row, ga.HandleText(ctx, row.Text))
+		return
 	}
 
 	// Unknown slash-commands NEVER reach the LLM (owner rule 22 Sep: replies
@@ -244,7 +255,7 @@ func (d *Dispatcher) helpText() string {
 		"Router commands answer instantly and free: /uptime /disk /memory /hostname /kernel /who\n" +
 		"/csv_summary <path> · /csv_head <path> [rows]\n" +
 		"/rules lists every active rule.\n" +
-		"HITL: /approvals lists pending · /approve <id> · /deny <id> (bare /approve decides the oldest).\n" +
+		"HITL: /approvals lists pending · /approve <id> · /deny <id> (bare /approve decides the oldest).\n/reload_rules — L2 action: hot-reload router rules after approval (✅/🚫 buttons).\n" +
 		"Anything else goes to the LLM (if enabled)."
 }
 

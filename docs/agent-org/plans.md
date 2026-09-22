@@ -8,9 +8,8 @@ jangan hapus histori; item selesai tinggal diberi tanggal.
 
 ## P1 — Core agent loop (Now)
 
-- [~] **First REAL gated L2 tool** (RunGated consumer): tool yang kena
-  policy L2 membuat approval asli → tombol ✅/🚫 → eksekusi pasca
-  approve. Target: /rules + system_command `reload_rules` atau `restart`.
+- [x] **First REAL gated L2 tool** — /reload_rules via ReloadGate
+  (ADR-0007), 2026-09-22.
 - [ ] **REST HITL endpoints**: `POST /v1/approvals/{id}/decision` —
   jalan ketiga selain teks & tombol (untuk CLI/script).
 - [ ] **Edit-message on decision**: pesan approval di-edit jadi
@@ -42,6 +41,8 @@ jangan hapus histori; item selesai tinggal diberi tanggal.
   untuk payload besar (sekarang dipotong 120 char).
 
 ## Done (2026-09-22)
+
+- [x] First gated L2 action /reload_rules (ADR-0007, feat/first-gated-tool)
 
 - [x] docs foundation + SDLC (34255ca)
 - [x] e2e baseline 11/11 (d192ebb)

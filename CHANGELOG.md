@@ -6,6 +6,10 @@ adapts it to agent-org merges (every entry = one feature branch merged).
 ## [Unreleased]
 
 ### Added
+- 2026-09-22 — First gated L2 action /reload_rules (ADR-0007):
+  ReloadGate (app layer) + telegram.GatedAction interface; command →
+  approval → ✅/🚫 buttons → execute-on-approve; deny/timeout keeps
+  previous rules. 3 tests (approve/deny/timeout flows).
 - 2026-09-22 — docs/org-memory: lessons-learned.md (6 LL seed: 409
   double-poller, guard-swallow, notifier false-alarm, KeepAlive dict,
   gateway scanner, fake-contract) + plans.md (P1-P4 roadmap + done list)

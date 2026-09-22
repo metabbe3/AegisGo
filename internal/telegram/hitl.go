@@ -175,3 +175,17 @@ func (d *Dispatcher) callbackText(ctx context.Context, row InboxRow) string {
 	}
 	return outcome
 }
+
+// GatedAction is an L2 action the human can trigger by command: it makes
+// its own approval, waits for the verdict (typed), and runs only on
+// approve. The dispatcher never learns the action's internals.
+type GatedAction interface {
+	// Handle runs the full gated flow; the string result is human text.
+	HandleText(ctx context.Context, reason string) string
+}
+
+// RegisterGated wires named actions ("/reload_rules" → action).
+// Call once at build time; nil map = the path stays inert.
+func (d *Dispatcher) RegisterGated(m map[string]GatedAction) {
+	d.gated = m
+}
