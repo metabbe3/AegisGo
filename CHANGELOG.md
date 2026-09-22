@@ -6,6 +6,10 @@ adapts it to agent-org merges (every entry = one feature branch merged).
 ## [Unreleased]
 
 ### Added
+- 2026-09-22 — HITL gate executor + AI-free command replies
+  (feat/hitl-executor): `tools.RunGated` (typed outcomes, fail-closed,
+  payload-exactly-as-approved) + dispatcher guard so unknown slash-commands
+  answer deterministically and NEVER hit the LLM (ADR-0005). 8 gate tests.
 - 2026-09-22 — Telegram HITL commands (feat/telegram-approvals):
   /approvals, /approve <id>, /deny <id>, bare /approve = oldest pending.
   Transport-level (never router rules), pending-only CAS, honest no-op

@@ -383,7 +383,10 @@ func newHitlDispatcher(t *testing.T, ap approver) (*Dispatcher, *Inbox, *fakeCli
 	t.Cleanup(func() { st.Close() })
 	c := &fakeClient{}
 	inbox := NewInbox(st)
-	return NewDispatcher(fakeEngine{answer: "x"}, c, inbox, []int64{chatOK}, nil, logger, ap), inbox, c
+	rules := func() []string {
+		return []string{"uptime → /uptime → system_command"}
+	}
+	return NewDispatcher(fakeEngine{answer: "x"}, c, inbox, []int64{chatOK}, rules, logger, ap), inbox, c
 }
 
 func TestApprovalsCommandLists(t *testing.T) {
@@ -460,5 +463,16 @@ func TestApprovalsUnwired(t *testing.T) {
 	d.Process(t.Context(), feed(t, inbox, 9008, "/approvals"))
 	if !strings.Contains(lastSend(c), "unavailable") {
 		t.Errorf("unwired text wrong: %q", lastSend(c))
+	}
+}
+
+func TestUnknownSlashCommandNeverHitsEngine(t *testing.T) {
+	// Owner rule: command replies must be AI-free. An unknown slash-command
+	// must be answered deterministically and must NOT reach the engine.
+	d, inbox, c := newHitlDispatcher(t, nil)
+	d.Process(t.Context(), feed(t, inbox, 9010, "/definitely_not_a_command"))
+	body := lastSend(c)
+	if !strings.Contains(body, "Unknown command") || !strings.Contains(body, "/uptime") {
+		t.Errorf("unknown-command reply wrong: %q", body)
 	}
 }
