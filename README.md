@@ -103,6 +103,12 @@ gRPC is on the roadmap (PRODUCT.md) riding the same engine.
 
 ## Telegram (built in, dormant until enabled)
 
+> **HITL approvals ship with buttons**: new L2 approvals are pushed to
+> allowlisted chats with ✅/🚫 inline buttons (ADR-0006), decided via
+> button, typed command, or `POST /v1/approvals/{id}/decision` — one
+> pending-only CAS across all three paths (ADR-0008). First gated
+> action: `/reload_rules` (ADR-0007).
+
 The full Telegram interface ships in the binary — **one env var activates it**:
 
 ```bash

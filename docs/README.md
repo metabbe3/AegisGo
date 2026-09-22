@@ -17,3 +17,9 @@ handoff.md → continue.
 
 Rules of the folder: append, don't rewrite · date everything · cite
 sources · every claim here must be verifiable in the repo.
+
+## agent-org (org memory)
+
+- lessons-learned.md — append-only incident memory (LL-NNN)
+- plans.md — P1-P4 roadmap + done list
+- decisions/ — ADR-0001…0008

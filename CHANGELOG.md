@@ -6,6 +6,8 @@ adapts it to agent-org merges (every entry = one feature branch merged).
 ## [Unreleased]
 
 ### Added
+- 2026-09-22 — Docs sync: README/WORKFLOW/CLAUDE/docs-README now cover
+  buttons, 3 decision paths, /reload_rules, launchd ops, ADR-0001…0008.
 - 2026-09-22 — HITL REST endpoints (ADR-0008): GET /v1/approvals +
   POST /v1/approvals/{id}/decision — same CAS as buttons/commands;
   409-with-truth on double-decide; 5 tests.
