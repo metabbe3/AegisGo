@@ -6,6 +6,9 @@ adapts it to agent-org merges (every entry = one feature branch merged).
 ## [Unreleased]
 
 ### Added
+- 2026-09-22 — HITL REST endpoints (ADR-0008): GET /v1/approvals +
+  POST /v1/approvals/{id}/decision — same CAS as buttons/commands;
+  409-with-truth on double-decide; 5 tests.
 - 2026-09-22 — Merged ALL branches incl. upstream refactor/simplify-pass
   (13 Sep): e2e 13-stage, pathutil coverage, poll goroutine fixes,
   single-binary consolidation (aegis serve) — plist + deploy migrated.

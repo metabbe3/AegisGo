@@ -10,7 +10,8 @@ jangan hapus histori; item selesai tinggal diberi tanggal.
 
 - [x] **First REAL gated L2 tool** — /reload_rules via ReloadGate
   (ADR-0007), 2026-09-22.
-- [ ] **REST HITL endpoints**: `POST /v1/approvals/{id}/decision` —
+- [x] **REST HITL endpoints** (ADR-0008) — 2026-09-22
+- [ ] ~~REST HITL endpoints~~: `POST /v1/approvals/{id}/decision` —
   jalan ketiga selain teks & tombol (untuk CLI/script).
 - [ ] **Edit-message on decision**: pesan approval di-edit jadi
   "✅ approved by … at …" (bukan cuma toast) — riwayat chat rapi.
