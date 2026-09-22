@@ -6,6 +6,10 @@ adapts it to agent-org merges (every entry = one feature branch merged).
 ## [Unreleased]
 
 ### Added
+- 2026-09-22 — docs/org-memory: lessons-learned.md (6 LL seed: 409
+  double-poller, guard-swallow, notifier false-alarm, KeepAlive dict,
+  gateway scanner, fake-contract) + plans.md (P1-P4 roadmap + done list)
+  + SDLC documentation rule (every merge touches lessons/plans/handoff).
 - 2026-09-22 — Interactive approval buttons (feat/approval-buttons):
   notifier now sends ✅ Approve / 🚫 Deny inline keyboards; presses flow
   through the same inbox (cb_id/cb_data columns, migration v5) and the

@@ -60,3 +60,21 @@ Repo: github.com/metabbe3/AegisGo (clone ~/Documents/aegisgo on Mac mini).
 5. K4 HITL: `requires_approval` tool flag → Telegram pause/resume.
 6. K2 memory tiers (episodic + semantic via sqlite-vec research).
 7. K1 MCP client expansion + K6 prompt registry.
+
+
+## DOKUMENTASI (owner rule 22 Sep 2026)
+
+Setiap merge WAJIB menyentuh tiga file ini kalau relevan:
+
+1. **lessons-learned.md** — bug/anomali/di-salahkan-halus apapun yang
+   ketemu selama pengerjaan → append LL-NNN (gejala → akar masalah →
+   fix → aturan). Tidak ada yang terlalu kecil; LL terkecil yang
+   berulang jadi pola.
+2. **plans.md** — item baru dimasukkan SEBELUM dikerjakan (status [ ]),
+   di-flip saat selesai ([x] + tanggal). Keputusan tolak/blocked masuk
+   bagian Blocked dengan alasan.
+3. **handoff.md** — log session seperti selama ini (apa yang selesai,
+   trap, next first step).
+
+Bug production yang baru ketemu → entri LL baru di sesi yang sama,
+jangan ditunda ke "nanti saya catat".
