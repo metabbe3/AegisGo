@@ -5,6 +5,11 @@ adapts it to agent-org merges (every entry = one feature branch merged).
 
 ## [Unreleased]
 
+### Added
+- 2026-09-22 — /status bot command (P4): one-glance health — uptime,
+  total runs, deflection %, per-source counts, rules by state, router
+  latency. Degrades honestly when stats aren't wired.
+
 ### Fixed
 - 2026-09-22 — Inline buttons did NOTHING on tap (P0, owner-reported):
   allowed_updates lacked callback_query so Telegram never delivered

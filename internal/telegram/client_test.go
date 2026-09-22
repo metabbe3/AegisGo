@@ -297,8 +297,11 @@ func TestGetUpdatesParams(t *testing.T) {
 		t.Errorf("timeout = %v, want 25", body["timeout"])
 	}
 	allowed, _ := body["allowed_updates"].([]any)
-	if len(allowed) != 1 || allowed[0] != "message" {
-		t.Errorf("allowed_updates = %v, want [message]", body["allowed_updates"])
+	// Both kinds are REQUIRED: message (text) and callback_query (inline
+	// button presses) — dropping callback_query silently kills the
+	// buttons (LL-008).
+	if len(allowed) != 2 || allowed[0] != "message" || allowed[1] != "callback_query" {
+		t.Errorf("allowed_updates = %v, want [message callback_query]", body["allowed_updates"])
 	}
 
 	// Offset 0 is omitted (omitempty): the server starts from the oldest.

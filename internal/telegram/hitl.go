@@ -189,6 +189,9 @@ type GatedAction interface {
 	HandleText(ctx context.Context, reason string) string
 }
 
+// SetStats wires the stats source for /status.
+func (d *Dispatcher) SetStats(s statser) { d.stats = s }
+
 // RegisterGated wires named actions ("/reload_rules" → action).
 // Call once at build time; nil map = the path stays inert.
 func (d *Dispatcher) RegisterGated(m map[string]GatedAction) {
