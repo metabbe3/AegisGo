@@ -89,6 +89,11 @@ func (d *Dispatcher) decideOne(ctx context.Context, id int64, state string, row 
 	if !ok {
 		return fmt.Sprintf("#%d is not pending (already decided or expired) — nothing changed.", id)
 	}
+	// Decision landed: edit the pushed button message to its final state
+	// (ADR-0009) — the chat stays a tidy record and stale buttons vanish.
+	if d.onDecided != nil {
+		d.onDecided(id, state, by)
+	}
 	switch state {
 	case "approved":
 		return fmt.Sprintf("#%d approved. The waiting executor (if any) proceeds after policy re-check.", id)
@@ -188,4 +193,10 @@ type GatedAction interface {
 // Call once at build time; nil map = the path stays inert.
 func (d *Dispatcher) RegisterGated(m map[string]GatedAction) {
 	d.gated = m
+}
+
+// OnDecided registers the post-decision hook (edit the pushed message,
+// ADR-0009). Safe to call once at build time.
+func (d *Dispatcher) OnDecided(f func(approvalID int64, verdict, by string)) {
+	d.onDecided = f
 }

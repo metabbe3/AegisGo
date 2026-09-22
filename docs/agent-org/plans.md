@@ -13,8 +13,7 @@ jangan hapus histori; item selesai tinggal diberi tanggal.
 - [x] **REST HITL endpoints** (ADR-0008) — 2026-09-22
 - [ ] ~~REST HITL endpoints~~: `POST /v1/approvals/{id}/decision` —
   jalan ketiga selain teks & tombol (untuk CLI/script).
-- [ ] **Edit-message on decision**: pesan approval di-edit jadi
-  "✅ approved by … at …" (bukan cuma toast) — riwayat chat rapi.
+- [x] **Edit-message on decision** (ADR-0009) — 2026-09-22.
 
 ## P2 — Reliability & ops
 
