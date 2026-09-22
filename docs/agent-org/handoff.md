@@ -12,6 +12,12 @@
   one binary / four faces — CLAUDE.md is the truth). docs/ didn't exist
   until this branch. Deck claims "13 e2e gates" — scripts/e2e.sh exists,
   full staged run not yet executed on this machine (macOS supported).
-- **Next first step**: run `bash scripts/e2e.sh` once to baseline the
-  staged checks on this machine, then start L-tier policy engine
-  (backlog #3) on a fresh branch.
+- **Next first step**: L-tier policy engine (backlog #3) on a fresh
+  branch after this one merges.
+
+## 2026-09-22 (session 2 — e2e baseline)
+
+- **Done**: `bash scripts/e2e.sh` full staged run on Mac mini:
+  **S0-S10 PASS (11/11 runnable), S11 SKIP** (no ollama model —
+  3090 PC off; needs `ollama pull qwen2.5:0.5b` to enable).
+  RESULT: PASS, no failed stages. This is the machine baseline.
