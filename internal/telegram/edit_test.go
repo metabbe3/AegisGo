@@ -56,7 +56,7 @@ func TestEditorEditsDecidedMessage(t *testing.T) {
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		if txts := fc.texts(); len(txts) == 1 {
-			want := "✅ #3 approved by telegram:100"
+			want := "✅ Approval #3 approved by Telegram"
 			if len(txts[0]) < len(want) || txts[0][:len(want)] != want {
 				t.Fatalf("edit text = %q", txts[0])
 			}

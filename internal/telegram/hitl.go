@@ -27,16 +27,14 @@ func (d *Dispatcher) approvalsText(ctx context.Context) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Pending approvals (%d):\n", len(pend))
 	for _, a := range pend {
-		reason := a.Reason
-		if len(reason) > 80 {
-			reason = reason[:80] + "…"
+		fmt.Fprintf(&b, "#%d · %s\n", a.ID, humanKind(a.Kind))
+		if a.Reason != "" {
+			fmt.Fprintf(&b, "  %s\n", a.Reason)
 		}
-		payload := a.Payload
-		if len(payload) > 120 {
-			payload = payload[:120] + "…"
+		if line := renderPayload(a.Payload); line != "" {
+			fmt.Fprintf(&b, "  %s\n", line)
 		}
-		fmt.Fprintf(&b, "#%d %s — %s\n  %s\n  /approve %d · /deny %d\n",
-			a.ID, a.Kind, reason, payload, a.ID, a.ID)
+		fmt.Fprintf(&b, "  /approve %d · /deny %d\n", a.ID, a.ID)
 	}
 	return b.String()
 }

@@ -355,10 +355,17 @@ func (d *Dispatcher) statusText(ctx context.Context) string {
 	}
 	fmt.Fprintf(&b, "runs %d · deflection %.1f%%\n", snap.TotalRuns, snap.DeflectionRate*100)
 	if len(snap.BySource) > 0 {
+		labels := map[string]string{
+			"regex_router":   "Router",
+			"llm_classifier": "Fast tier",
+			"llm":            "LLM",
+			"llm_disabled":   "LLM off",
+			"error":          "Errors",
+		}
 		parts := make([]string, 0, len(snap.BySource))
 		for _, src := range []string{"regex_router", "llm_classifier", "llm", "llm_disabled", "error"} {
 			if n, ok := snap.BySource[src]; ok {
-				parts = append(parts, fmt.Sprintf("%s %d", src, n))
+				parts = append(parts, fmt.Sprintf("%s %d", labels[src], n))
 			}
 		}
 		b.WriteString(strings.Join(parts, " · ") + "\n")
@@ -373,7 +380,7 @@ func (d *Dispatcher) statusText(ctx context.Context) string {
 		b.WriteString("rules: " + strings.Join(parts, " · ") + "\n")
 	}
 	if avg, ok := snap.AvgLatencyMS["regex_router"]; ok {
-		fmt.Fprintf(&b, "router latency %dms\n", avg)
+		fmt.Fprintf(&b, "Router answers in %dms\n", avg)
 	}
 	return b.String()
 }
