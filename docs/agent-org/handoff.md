@@ -31,3 +31,15 @@
   honestly, not skip (project law, not a style choice).
 - **Next first step**: K4 HITL approval path (L2 tier executor with
   pause/resume) — or N1 YAML manifest, pick per blueprint backlog.
+
+## 2026-09-22 (session 4 — HITL ledger v0)
+
+- **Done**: feat/hitl-gate — approvals table (v4 migration) + store CRUD
+  with pending-only CAS, TTL expiry sweeper, capped pending list. 6 tests
+  green; vet/test/check/cover(93.8%) all pass.
+- **Trap learned**: modernc :memory: is per-connection — Open(":memory:")
+  pins pool to 1 conn; scan TEXT timestamps into string, not time.Time
+  (audit convention). INSERT..RETURNING for ids outside the batcher.
+- **Next first step**: wire the ledger — engine L2 executor stub
+  (create approval → wait → run if approved) + Telegram /approve /
+  /deny commands. REST endpoints after.

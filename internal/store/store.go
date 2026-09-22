@@ -264,6 +264,11 @@ func (s *Store) migrate() error {
 			return err
 		}
 	}
+	if version < 4 {
+		if err := s.migrateV4(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
