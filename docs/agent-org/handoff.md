@@ -21,3 +21,13 @@
   **S0-S10 PASS (11/11 runnable), S11 SKIP** (no ollama model —
   3090 PC off; needs `ollama pull qwen2.5:0.5b` to enable).
   RESULT: PASS, no failed stages. This is the machine baseline.
+
+## 2026-09-22 (session 3 — policy engine v0)
+
+- **Done**: feat/policy-engine — tier field on commandSpec, PolicyTier in
+  SystemOutput + exported lookup, 2 new tests (L1-only invariant, tier in
+  run output), ADR-0002. Gates: vet/test/check/cover all green.
+- **Trap learned**: make check forbids t.Skipf — hostname test must fail
+  honestly, not skip (project law, not a style choice).
+- **Next first step**: K4 HITL approval path (L2 tier executor with
+  pause/resume) — or N1 YAML manifest, pick per blueprint backlog.

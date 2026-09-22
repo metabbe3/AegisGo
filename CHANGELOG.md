@@ -6,6 +6,11 @@ adapts it to agent-org merges (every entry = one feature branch merged).
 ## [Unreleased]
 
 ### Added
+- 2026-09-22 — L-tier policy verdicts on system_command (feat/policy-engine):
+  every catalog entry carries an explicit tier (`L1`), reported in tool
+  output + `tools.PolicyTier(key)`; catalog membership == L1 enforced by
+  test (ADR-0002). Unknown keys stay fail-closed.
+  (why: blueprint §L owner mandate — auditable command policy)
 - 2026-09-22 — docs foundation (agent-org): `docs/agent-org/SDLC.md`
   (branch-per-feature pipeline + gates), `docs/decisions/ADR-0001`
   (agent-org takes over development), `docs/agent-org/handoff.md`
