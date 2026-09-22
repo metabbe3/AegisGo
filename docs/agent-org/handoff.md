@@ -91,3 +91,15 @@
 - **Next first step**: first REAL gated L2 tool via RunGated (store shim
   for ApprovalLedger), then launchd service (auto-restart, single
   instance) to retire the manual boot dance.
+
+## 2026-09-22 (session 8 — notifier observability)
+
+- **Done**: fix/notifier-observability — prime/announce INFO logs +
+  announce-success line, tick DEBUG; Build-level integration test
+  (fake Bot API) proves the notifier wiring end-to-end.
+- **Live verified**: seeded #5 → announce executed (last_seen 4→5,
+  0 send failures). Earlier "silence" root-caused: v1 race (prime before
+  seed) + user approving #2/#3 from the bot before I checked logs —
+  dispatcher + approvals fully working in production the whole time.
+- **Next first step**: first REAL gated L2 tool via RunGated, then
+  launchd service (auto-restart, single-instance lock).
