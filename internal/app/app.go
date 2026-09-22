@@ -199,6 +199,13 @@ func startTelegram(ctx context.Context, cfg config.Config, eng *engine.Engine,
 	tgCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	pool.Start(tgCtx)
 
+	// Approval notifier: push NEW pending approvals to the allowlisted
+	// chats (ADR-0006). Runs in poll mode AND webhook mode — it reads the
+	// ledger, not the transport. Disabled cleanly when no chats are set.
+	notif := telegram.NewNotifier(&approvalSourceShim{st: st}, client, cfg.TelegramChats,
+		5*time.Second, logger)
+	go notif.Start(tgCtx)
+
 	var webhook http.Handler
 	if cfg.TelegramUseWebhook() {
 		if cfg.TelegramWebhookURL == "" {
@@ -228,4 +235,19 @@ func startTelegram(ctx context.Context, cfg config.Config, eng *engine.Engine,
 		cancel()
 	}
 	return webhook, stop, nil
+}
+
+// approvalSourceShim adapts *store.Store to telegram.ApprovalSource.
+type approvalSourceShim struct{ st *store.Store }
+
+func (s *approvalSourceShim) PendingApprovals(ctx context.Context, limit int) ([]telegram.ApprovalInfo, error) {
+	rows, err := s.st.PendingApprovals(ctx, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]telegram.ApprovalInfo, 0, len(rows))
+	for _, a := range rows {
+		out = append(out, telegram.ApprovalInfo{ID: a.ID, Kind: a.Kind, Reason: a.Reason, Payload: a.Payload})
+	}
+	return out, nil
 }
