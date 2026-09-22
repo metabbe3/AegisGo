@@ -28,16 +28,24 @@ const systemDefaultTimeout = 10 * time.Second
 type commandSpec struct {
 	argv        []string
 	description string
+	// tier is the L-tier policy verdict for this command (blueprint §L).
+	// L1 = auto-allow (read-only/build, always logged).
+	// L2 = needs approval before execution (hitl gate) — not in catalog yet.
+	// L3 = hard-deny (never catalog-able; enforced by absence + review).
+	tier string
 }
 
 // catalog is the complete set of commands system_command may run.
+// Every entry MUST be tier L1: a command needing approval (L2) or
+// forbidden outright (L3) does not belong here — see docs/decisions
+// ADR-0002. Catalog additions are human-edited (CLAUDE.md rule #3).
 var catalog = map[string]commandSpec{
-	"uptime":   {argv: []string{"uptime"}, description: "System uptime and load average"},
-	"disk":     {argv: []string{"df", "-h"}, description: "Disk usage per filesystem"},
-	"memory":   {argv: []string{"free", "-m"}, description: "Memory usage in MiB"},
-	"hostname": {argv: []string{"hostname"}, description: "Machine hostname"},
-	"kernel":   {argv: []string{"uname", "-sr"}, description: "Kernel name and release"},
-	"who":      {argv: []string{"who"}, description: "Logged-in users"},
+	"uptime":   {argv: []string{"uptime"}, description: "System uptime and load average", tier: "L1"},
+	"disk":     {argv: []string{"df", "-h"}, description: "Disk usage per filesystem", tier: "L1"},
+	"memory":   {argv: []string{"free", "-m"}, description: "Memory usage in MiB", tier: "L1"},
+	"hostname": {argv: []string{"hostname"}, description: "Machine hostname", tier: "L1"},
+	"kernel":   {argv: []string{"uname", "-sr"}, description: "Kernel name and release", tier: "L1"},
+	"who":      {argv: []string{"who"}, description: "Logged-in users", tier: "L1"},
 }
 
 // SystemInput is the schema for the system_command tool.
@@ -50,6 +58,7 @@ type SystemInput struct {
 // SystemOutput is the result of system_command.
 type SystemOutput struct {
 	Command    string `json:"command"`
+	PolicyTier string `json:"policy_tier"` // L1 auto-allow · L2 needs-approval · L3 hard-deny
 	Output     string `json:"output"`
 	Truncated  bool   `json:"truncated"`
 	DurationMS int64  `json:"duration_ms"`
@@ -100,10 +109,18 @@ func runSystem(ctx context.Context, in SystemInput) (SystemOutput, error) {
 	}
 	return SystemOutput{
 		Command:    key,
+		PolicyTier: spec.tier,
 		Output:     buf.String(),
 		Truncated:  buf.truncated,
 		DurationMS: time.Since(start).Milliseconds(),
 	}, nil
+}
+
+// PolicyTier reports the L-tier verdict for a catalog key ("L1"…), or
+// "" when unknown — callers can log the verdict alongside the audit row
+// without executing anything.
+func PolicyTier(key string) string {
+	return catalog[strings.TrimSpace(key)].tier
 }
 
 // CatalogCommands describes the catalog for docs/tests.

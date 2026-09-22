@@ -162,3 +162,29 @@ func TestLimitedBufferTruncation(t *testing.T) {
 			strings.Count(s, "b"), strings.Contains(s, "c"))
 	}
 }
+
+func TestPolicyTierReportedAndL1Only(t *testing.T) {
+	// Every catalog entry must carry tier L1 (ADR-0002): anything needing
+	// approval (L2) or forbidden (L3) must not be catalog-able at all.
+	for key, spec := range catalog {
+		if spec.tier != "L1" {
+			t.Errorf("catalog key %q has tier %q, want L1 (L2/L3 must not be in catalog)", key, spec.tier)
+		}
+	}
+	if PolicyTier("uptime") != "L1" {
+		t.Errorf("PolicyTier(uptime) = %q, want L1", PolicyTier("uptime"))
+	}
+	if PolicyTier("definitely-not-a-key") != "" {
+		t.Errorf("PolicyTier(unknown) = %q, want empty", PolicyTier("definitely-not-a-key"))
+	}
+}
+
+func TestRunSystemReportsPolicyTier(t *testing.T) {
+	out, err := runSystem(t.Context(), SystemInput{Command: "hostname"})
+	if err != nil {
+		t.Fatalf("hostname should run on unix targets: %v", err)
+	}
+	if out.PolicyTier != "L1" {
+		t.Errorf("PolicyTier = %q, want L1 in run output", out.PolicyTier)
+	}
+}
