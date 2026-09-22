@@ -6,6 +6,10 @@ adapts it to agent-org merges (every entry = one feature branch merged).
 ## [Unreleased]
 
 ### Added
+- 2026-09-22 — Daily digest (ADR-0010): one deterministic 07:00 message
+  per chat — uptime, runs, deflection, pending count, last 3 decisions.
+- 2026-09-22 — /history command: last 10 decisions with verdict icons,
+  newest first.
 - 2026-09-22 — Human-readable replies (owner rule): approval pushes,
   listings, decision edits, and /status labels render as sentences —
   no raw JSON, no underscores ("Command reload rules", "Router 1101",

@@ -246,6 +246,29 @@ func startTelegram(ctx context.Context, cfg config.Config, eng *engine.Engine,
 	notif.SetEditRegistry(editReg)
 	go notif.Start(tgCtx)
 
+	// Daily digest (ADR-0010): one deterministic morning message per
+	// chat — uptime, runs, pending count, last decisions. No LLM.
+	dig := telegram.NewDigest(client, cfg.TelegramChats, st, st, st, logger)
+	go func() {
+		// Align to the next 07:00 local, then every 24h.
+		now := time.Now()
+		next := time.Date(now.Year(), now.Month(), now.Day(), 7, 0, 0, 0, now.Location())
+		if !next.After(now) {
+			next = next.Add(24 * time.Hour)
+		}
+		tm := time.NewTimer(time.Until(next))
+		defer tm.Stop()
+		for {
+			select {
+			case <-tgCtx.Done():
+				return
+			case <-tm.C:
+				dig.Send(tgCtx)
+				tm.Reset(24 * time.Hour)
+			}
+		}
+	}()
+
 	// First REAL gated action: /reload_rules re-reads the rules table and
 	// swaps the live router — only after a human approves (ADR-0007).
 	rg := &ReloadGate{Store: st, Router: rt}
