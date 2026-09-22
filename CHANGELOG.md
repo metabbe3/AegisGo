@@ -6,6 +6,9 @@ adapts it to agent-org merges (every entry = one feature branch merged).
 ## [Unreleased]
 
 ### Added
+- 2026-09-22 — /reload_rules diff preview (ADR-0011): approval reason
+  embeds the old→new rule changes (+ added · − dropped · ~ changed) —
+  approve what you see.
 - 2026-09-22 — Daily digest (ADR-0010): one deterministic 07:00 message
   per chat — uptime, runs, deflection, pending count, last 3 decisions.
 - 2026-09-22 — /history command: last 10 decisions with verdict icons,

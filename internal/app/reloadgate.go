@@ -104,7 +104,11 @@ var _ tools.ApprovalLedger = (*existingApproval)(nil)
 
 // gatedText adapts ReloadGate to the telegram.GatedAction interface with
 // honest, human-readable outcomes for every branch.
-type gatedText struct{ g *ReloadGate }
+type gatedText struct{ g gateHandler }
+
+type gateHandler interface {
+	Handle(ctx context.Context, reason string) (any, tools.GateOutcome, error)
+}
 
 func (gt gatedText) HandleText(ctx context.Context, reason string) string {
 	out, outcome, err := gt.g.Handle(ctx, reason)
