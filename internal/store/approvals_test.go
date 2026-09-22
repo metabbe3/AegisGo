@@ -145,3 +145,33 @@ func TestGetApprovalMissing(t *testing.T) {
 		t.Errorf("missing row: ok=%v err=%v", ok, err)
 	}
 }
+
+// RecentDecisions: newest-first, pending excluded, capped.
+func TestRecentDecisions(t *testing.T) {
+	st := newApprovalTestStore(t)
+	ctx := t.Context()
+	for i := 0; i < 3; i++ {
+		id, err := st.CreateApproval(ctx, "k", `{}`, "r")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if i < 2 {
+			if _, err := st.DecideApproval(ctx, id, "approved", "telegram:1"); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	got, err := st.RecentDecisions(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("want 2 decided, got %d", len(got))
+	}
+	if got[0].ID < got[1].ID {
+		t.Fatalf("not newest-first: %v then %v", got[0].ID, got[1].ID)
+	}
+	if got[0].State != "approved" || got[0].DecidedBy != "telegram:1" {
+		t.Fatalf("row wrong: %+v", got[0])
+	}
+}

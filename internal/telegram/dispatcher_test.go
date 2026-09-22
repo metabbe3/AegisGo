@@ -547,3 +547,35 @@ func TestStatusNoStats(t *testing.T) {
 		t.Fatalf("want stats unavailable, got %q", got)
 	}
 }
+
+// /history lists decided rows newest-first with human verdict icons.
+func TestHistoryCommand(t *testing.T) {
+	c := &fakeClient{}
+	d, inbox, st := dispatcherWithStore(t, fakeEngine{answer: "x"}, c,
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctx := t.Context()
+	id1, _ := st.CreateApproval(ctx, "system_command", `{"command":"restart"}`, "L2")
+	st.DecideApproval(ctx, id1, "approved", "telegram:100")
+	id2, _ := st.CreateApproval(ctx, "system_command", `{"command":"reload"}`, "L2")
+	st.DecideApproval(ctx, id2, "denied", "cli")
+	d.SetHistory(st)
+	d.Process(ctx, feed(t, inbox, 9105, "/history"))
+	got := lastSend(c)
+	if !strings.Contains(got, "✅ #") || !strings.Contains(got, "🚫 #") {
+		t.Fatalf("history missing verdicts: %q", got)
+	}
+	if !strings.Contains(got, "System command") {
+		t.Fatalf("history not human: %q", got)
+	}
+}
+
+// /history without the store wired degrades honestly.
+func TestHistoryNoStore(t *testing.T) {
+	c := &fakeClient{}
+	d, inbox, _ := dispatcherWithStore(t, fakeEngine{answer: "x"}, c,
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+	d.Process(t.Context(), feed(t, inbox, 9106, "/history"))
+	if !strings.Contains(lastSend(c), "unavailable") {
+		t.Fatalf("want unavailable, got %q", lastSend(c))
+	}
+}

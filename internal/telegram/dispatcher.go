@@ -41,6 +41,8 @@ type Dispatcher struct {
 	gated map[string]GatedAction
 	// stats backs /status (nil = command reports unavailable).
 	stats statser
+	// hist backs /history (nil = command reports unavailable).
+	hist historian
 	// startedAt anchors the /status uptime line.
 	startedAt time.Time
 	// onDecided fires after a successful decision (edit pushed message).
@@ -119,6 +121,9 @@ func (d *Dispatcher) Process(ctx context.Context, row InboxRow) {
 		return
 	case "/status":
 		d.claimAndSend(ctx, row, d.statusText(ctx))
+		return
+	case "/history":
+		d.claimAndSend(ctx, row, d.historyText(ctx))
 		return
 	case "/deny":
 		d.claimAndSend(ctx, row, d.decideText(ctx, row, "denied"))
@@ -278,6 +283,13 @@ func (d *Dispatcher) rulesText() string {
 	return "Active rules:\n" + strings.Join(lines, "\n")
 }
 
+// historian is the decisions slice /history needs.
+type historian interface {
+	RecentDecisions(ctx context.Context, limit int) ([]store.Approval, error)
+}
+
+var _ historian = (*store.Store)(nil)
+
 // statser is the stats slice /status needs (the store already
 // implements it — stats.Snapshot via store.Stats).
 type statser interface {
@@ -381,6 +393,47 @@ func (d *Dispatcher) statusText(ctx context.Context) string {
 	}
 	if avg, ok := snap.AvgLatencyMS["regex_router"]; ok {
 		fmt.Fprintf(&b, "Router answers in %dms\n", avg)
+	}
+	return b.String()
+}
+
+// SetHistory wires the decisions source for /history.
+func (d *Dispatcher) SetHistory(h historian) { d.hist = h }
+
+// historyText renders /history: the latest decisions, newest-first.
+// Human lines only — verdict icon, what, who, when.
+func (d *Dispatcher) historyText(ctx context.Context) string {
+	if d.hist == nil {
+		return "History unavailable (no store wired)."
+	}
+	dec, err := d.hist.RecentDecisions(ctx, 10)
+	if err != nil {
+		return "History lookup failed: " + err.Error()
+	}
+	if len(dec) == 0 {
+		return "No decisions yet. Everything is still pending. ⏳"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "📜 Last %d decisions (newest first):\n", len(dec))
+	for _, a := range dec {
+		icon := "•"
+		switch a.State {
+		case "approved":
+			icon = "✅"
+		case "denied":
+			icon = "🚫"
+		case "expired":
+			icon = "⌛"
+		}
+		who := a.DecidedBy
+		if i := strings.Index(who, ":"); i > 0 {
+			who = strings.ToUpper(who[:1]) + who[1:i]
+		}
+		when := a.DecidedAt
+		if t, err := time.Parse(time.RFC3339Nano, when); err == nil {
+			when = t.UTC().Format("02 Jan 15:04 UTC")
+		}
+		fmt.Fprintf(&b, "%s #%d %s — by %s · %s\n", icon, a.ID, humanKind(a.Kind), who, when)
 	}
 	return b.String()
 }

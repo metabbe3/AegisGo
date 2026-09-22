@@ -163,3 +163,29 @@ func (s *Store) migrateV5() error {
 	}
 	return tx.Commit()
 }
+
+// RecentDecisions lists the latest decided rows (state != pending),
+// newest-first, capped (rule #10) — backs the /history command.
+func (s *Store) RecentDecisions(ctx context.Context, limit int) ([]Approval, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 10
+	}
+	rows, err := s.Query(ctx, `SELECT id, created_at, kind, payload, reason,
+		state, COALESCE(decided_by,''), COALESCE(decided_at,'')
+		FROM approvals WHERE state != 'pending'
+		ORDER BY decided_at DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("recent decisions: %w", err)
+	}
+	defer rows.Close()
+	var out []Approval
+	for rows.Next() {
+		var a Approval
+		if err := rows.Scan(&a.ID, &a.CreatedAt, &a.Kind, &a.Payload, &a.Reason,
+			&a.State, &a.DecidedBy, &a.DecidedAt); err != nil {
+			return nil, fmt.Errorf("recent decisions scan: %w", err)
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}

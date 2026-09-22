@@ -251,8 +251,9 @@ func startTelegram(ctx context.Context, cfg config.Config, eng *engine.Engine,
 	rg := &ReloadGate{Store: st, Router: rt}
 	dispatcher.RegisterGated(map[string]telegram.GatedAction{"/reload_rules": gatedText{rg}})
 
-	// /status needs the same stats snapshot REST serves.
+	// /status + /history share the store REST already serves.
 	dispatcher.SetStats(st)
+	dispatcher.SetHistory(st)
 
 	// Decision edits: drain queue → EditMessageText on recorded targets.
 	ed := telegram.NewEditor(client, editReg, logger)
