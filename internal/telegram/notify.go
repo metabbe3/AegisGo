@@ -26,6 +26,9 @@ type ApprovalInfo struct {
 	Kind    string
 	Reason  string
 	Payload string
+	// CreatedAt is RFC3339 from the ledger; empty = unknown age (no
+	// reminders for sources that do not fill it).
+	CreatedAt string
 }
 
 // Notifier pushes new pending approvals to chats.
@@ -44,6 +47,12 @@ type Notifier struct {
 	// Rows only arrive here via CreateApproval (autoincrement), so
 	// id ordering is insertion ordering.
 	lastSeen int64
+
+	// reminderAfter: re-announce a still-pending approval once it is older
+	// than this. reminderAt tracks the next due reminder per approval id;
+	// each reminder pushes the next one a full reminderAfter later.
+	reminderAfter time.Duration
+	reminderAt    map[int64]time.Time
 }
 
 // NewNotifier builds a notifier. interval <= 0 defaults to 5s.
@@ -60,7 +69,8 @@ func NewNotifier(src ApprovalSource, c Client, chatIDs []int64,
 		logger = slog.Default()
 	}
 	return &Notifier{src: src, client: c, chatIDs: chatIDs,
-		interval: interval, logger: logger}
+		interval: interval, logger: logger,
+		reminderAfter: 30 * time.Minute, reminderAt: map[int64]time.Time{}}
 }
 
 // Start runs until ctx is cancelled. Errors are logged and retried on the
@@ -107,12 +117,42 @@ func (n *Notifier) tick(ctx context.Context) {
 	}
 	n.logger.Debug("telegram: notifier tick", "pending", len(pend), "last_seen", n.lastSeen)
 	for _, a := range pend {
-		if a.ID <= n.lastSeen {
+		if a.ID > n.lastSeen {
+			n.lastSeen = a.ID
+			n.announce(ctx, a)
 			continue
 		}
-		n.lastSeen = a.ID
-		n.announce(ctx, a)
+		n.maybeRemind(ctx, a)
 	}
+}
+
+// maybeRemind re-announces an approval that has sat pending past
+// reminderAfter. Approvals with no CreatedAt never remind (unknown age).
+func (n *Notifier) maybeRemind(ctx context.Context, a ApprovalInfo) {
+	if n.reminderAfter <= 0 || a.CreatedAt == "" {
+		return
+	}
+	created, err := time.Parse(time.RFC3339, a.CreatedAt)
+	if err != nil {
+		return // tolerate non-RFC3339 ledger formats: skip, don't crash
+	}
+	due, ok := n.reminderAt[a.ID]
+	if !ok {
+		due = created.Add(n.reminderAfter)
+		n.reminderAt[a.ID] = due
+	}
+	if time.Now().After(due) {
+		n.reminderAt[a.ID] = time.Now().Add(n.reminderAfter)
+		n.announceReminder(ctx, a)
+	}
+}
+
+// announceReminder re-sends the approval card with a nudge header. Same
+// buttons as the original so deciding from the reminder edits the newest
+// message (ADR-0009 registry keys by approval id, not message id).
+func (n *Notifier) announceReminder(ctx context.Context, a ApprovalInfo) {
+	n.announce(ctx, a)
+	n.logger.Info("telegram: approval reminder sent", "approval_id", a.ID, "age", n.reminderAfter)
 }
 
 func (n *Notifier) announce(ctx context.Context, a ApprovalInfo) {

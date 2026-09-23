@@ -354,7 +354,7 @@ func (s *approvalSourceShim) PendingApprovals(ctx context.Context, limit int) ([
 	}
 	out := make([]telegram.ApprovalInfo, 0, len(rows))
 	for _, a := range rows {
-		out = append(out, telegram.ApprovalInfo{ID: a.ID, Kind: a.Kind, Reason: a.Reason, Payload: a.Payload})
+		out = append(out, telegram.ApprovalInfo{ID: a.ID, Kind: a.Kind, Reason: a.Reason, Payload: a.Payload, CreatedAt: a.CreatedAt})
 	}
 	return out, nil
 }
