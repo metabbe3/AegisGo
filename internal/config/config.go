@@ -74,6 +74,8 @@ type Config struct {
 
 	// LogLevel is the slog level name: debug, info, warn, or error.
 	LogLevel string
+	// LogFile routes serve logs to a size-rotated file (empty = stdout).
+	LogFile string
 
 	// LLM toggles the fallback: "on" (default) or "off". Off makes every
 	// router miss return fast without a provider — the kill switch.
@@ -159,6 +161,7 @@ func Load() Config {
 		Addr:            envOr("AEGIS_ADDR", ":8080"),
 		GRPCAddr:        envOr("AEGIS_GRPC_ADDR", ":8081"),
 		LogLevel:        envOr("AEGIS_LOG_LEVEL", "info"),
+		LogFile:         envOr("AEGIS_LOG_FILE", ""),
 		LLM:             envOr("AEGIS_LLM", "on"),
 		DBPath:          envOr("AEGIS_DB_PATH", "aegisgo.db"),
 		SQLDSN:          envTrim("AEGIS_SQL_DSN"),

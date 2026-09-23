@@ -57,7 +57,15 @@ func serve(ctx context.Context, tierFlag string) error {
 	// package-global slog lines (audit "request", engine lifecycle) into
 	// the same stream instead of the stderr-text default. AEGIS_LOG_LEVEL
 	// finally means something here.
-	logger := logx.New(cfg.LogLevel, os.Stdout, true)
+	var logSink io.Writer = os.Stdout
+	if cfg.LogFile != "" {
+		// Size-rotated file logging: a daemon writing JSON lines forever
+		// would otherwise grow one unbounded file (launchd has no logrotate).
+		rw := &logx.RotatingWriter{Path: cfg.LogFile, MaxBytes: 10 << 20, KeepFiles: 5}
+		defer rw.Close()
+		logSink = rw
+	}
+	logger := logx.New(cfg.LogLevel, logSink, true)
 	slog.SetDefault(logger)
 
 	a, cleanup, err := app.Build(ctx, cfg, tier, store.IFaceREST, logger)
