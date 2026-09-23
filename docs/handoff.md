@@ -87,3 +87,20 @@ Also: REST/gRPC async runs now carry the sync path's 5-minute bound
 - Research: docs/research/2026-09-02-hermes-dify-classifier.md
 - Decisions: docs/decisions/ADR-0001 (single binary), ADR-0002 (classifier)
 - Lessons: docs/lessons-learned.md
+
+---
+
+## Brainstorm batch-4 (2026-09-23 malam — owner: "brainstorm lagi lanjut malam")
+
+Queue terurut nilai/efort; sesi sore udah merged #25-32:
+
+1. **/stats di Telegram (S)** — versi teks web dashboard: runs/deflection/by-source/rules-by-state/build. Dispatcher render dari statser yang udah ada. DoD: command + test + help text.
+2. **aegis ctl jobs (S)** — inspect background download jobs (list/status). Manager udah ada di internal/tools/jobs.go. DoD: subcommand ctl + test.
+3. **MCP bearer token utk HTTP/SSE transport (S→M)** — stdio lokal aman; remote perlu AEGIS_MCP_TOKEN + constant-time compare. DoD: config knob + middleware + test salah-token 401.
+4. **/reload_rules dari chat (S)** — gate + diff preview udah ada (ADR-0007/0011); tinggal register handler dispatcher. DoD: wiring + test end-to-end approve→reload.
+5. **SSE dashboard live (M)** — meta-refresh 30s → event-stream push. DoD: /v1/events + dashboard subscribe + test.
+6. **Rule mining v2 (M)** — multi-pattern synthesis dari corpus. Jaga invariant #12: hanya path-arg tools, divergence selalu demote. DoD: proposal format + test.
+7. **Store WAL checkpoint tuning (M)** — ukur batcher p99 dulu; tuning hanya kalau data bilang perlu. DoD: benchmark script + hasil tercatat.
+
+Urutan malam: 1 → 2 → 3 (semua S, cepat); 4-5 kalau waktu; 6-7 riset dulu.
+Branch per fitur, changelog+ADR kalau keputusan baru, deploy build+kickstart tiap batch.
