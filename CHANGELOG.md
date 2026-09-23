@@ -1,6 +1,7 @@
 # Changelog
 
 ## Added
+- **2026-09-23 — Build commit in /status**: `internal/version` package + ldflags injection; /status now answers "which build is live" without shell access.
 - **2026-09-23 — SQLite sidecar backup (ADR-0012)**: daily `VACUUM INTO` snapshot at 04:30 next to the DB, retention 7 files. `backupOnce` in `internal/app/backup.go` (idempotent same-day reruns, prune best-effort). Tests: sidecar is a readable DB, retention pruning, slice-bounds guard.
 
 All notable changes to AegisGo. Format: Keep-a-Changelog; this project
