@@ -23,6 +23,7 @@ import (
 	"aegisgo/internal/server"
 	"aegisgo/internal/store"
 	"aegisgo/internal/task"
+	"aegisgo/internal/version"
 )
 
 // serveCmd parses serve flags (--tier) and delegates to serve.
@@ -93,6 +94,9 @@ func serve(ctx context.Context, tierFlag string) error {
 			Approvals: a.Store,   // HITL REST (ADR-0008)
 			Tasks:     tasks,
 			Logger:    logger,
+			Dashboard: &server.DashboardDeps{ // mini status page at GET /
+				Stats: a.Store, StartedAt: time.Now(), Commit: version.Commit,
+			},
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}

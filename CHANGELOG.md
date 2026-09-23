@@ -1,6 +1,7 @@
 # Changelog
 
 ## Added
+- **2026-09-23 — Mini web dashboard at GET /**: self-contained HTML status page (uptime, runs/deflection, per-source breakdown, rules by state, build commit), meta-refresh 30s, no JS frameworks. Nil-stats still renders — liveness first.
 - **2026-09-23 — Dry-run gated verdicts (ADR-0013)**: `tools.DescribeGated` rehearses the HITL flow with zero side effects — same approval row + verdict, action replaced by payload echo.
 - **2026-09-23 — Approval TTL reminders**: still-pending approvals re-announce after 30 min (and every 30 min after), same ✅/🚫 buttons — decided-from-reminder edits the newest card (ADR-0009 keys by approval id). Sources without CreatedAt never remind.
 - **2026-09-23 — Build commit in /status**: `internal/version` package + ldflags injection; /status now answers "which build is live" without shell access.

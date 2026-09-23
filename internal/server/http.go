@@ -65,6 +65,9 @@ type Deps struct {
 	// endpoints answer 503 rather than 404-ing silently.
 	Approvals ApprovalSource
 	Logger    *slog.Logger
+	// Dashboard, when non-nil, mounts the mini status page at GET /
+	// (nil keeps / unmounted — embedders choose).
+	Dashboard *DashboardDeps
 }
 
 // Handler builds the HTTP routes.
@@ -82,6 +85,10 @@ func Handler(d Deps) http.Handler {
 		d.Tasks = &task.Group{}
 	}
 	mux := http.NewServeMux()
+
+	if d.Dashboard != nil {
+		mux.Handle("GET /{$}", dashboardHandler(*d.Dashboard))
+	}
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
