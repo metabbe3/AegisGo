@@ -5,6 +5,7 @@ package server
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -68,6 +69,32 @@ type Deps struct {
 	// Dashboard, when non-nil, mounts the mini status page at GET /
 	// (nil keeps / unmounted — embedders choose).
 	Dashboard *DashboardDeps
+	// AuthToken, when non-empty, gates every /v1/* route behind
+	// "Authorization: Bearer <token>" (constant-time). Empty = open
+	// (the LAN default). Health probes and the dashboard stay public.
+	AuthToken string
+}
+
+// bearerAuth wraps h, enforcing a constant-time Bearer match. An empty
+// token disables the gate entirely (fail-open is the documented default;
+// the knob exists for exposure beyond localhost).
+func bearerAuth(token string, h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if token == "" {
+			h.ServeHTTP(w, r)
+			return
+		}
+		got := r.Header.Get("Authorization")
+		const prefix = "Bearer "
+		if !strings.HasPrefix(got, prefix) ||
+			subtle.ConstantTimeCompare([]byte(got[len(prefix):]), []byte(token)) != 1 {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			writeJSON(w, http.StatusUnauthorized,
+				map[string]string{"error": "missing or invalid bearer token"})
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
 }
 
 // Handler builds the HTTP routes.
@@ -90,6 +117,11 @@ func Handler(d Deps) http.Handler {
 		mux.Handle("GET /{$}", dashboardHandler(*d.Dashboard))
 	}
 
+	// /v1/* sits behind the optional bearer gate; probes and the
+	// dashboard stay public (uptime checks must not need credentials).
+	v1 := http.NewServeMux()
+	mux.Handle("/v1/", bearerAuth(d.AuthToken, v1))
+
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
@@ -106,7 +138,7 @@ func Handler(d Deps) http.Handler {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 	})
 
-	mux.HandleFunc("POST /v1/agent/run", func(w http.ResponseWriter, r *http.Request) {
+	v1.HandleFunc("POST /v1/agent/run", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("stream") == "1" {
 			runAgentStream(w, r, d)
 			return
@@ -114,15 +146,15 @@ func Handler(d Deps) http.Handler {
 		runAgent(w, r, d)
 	})
 
-	mux.HandleFunc("GET /v1/stats", func(w http.ResponseWriter, r *http.Request) {
+	v1.HandleFunc("GET /v1/stats", func(w http.ResponseWriter, r *http.Request) {
 		statsHandler(w, r, d)
 	})
 
-	mux.HandleFunc("GET /v1/answers/{trace}", func(w http.ResponseWriter, r *http.Request) {
+	v1.HandleFunc("GET /v1/answers/{trace}", func(w http.ResponseWriter, r *http.Request) {
 		getAnswer(w, r, d)
 	})
 
-	mux.HandleFunc("GET /v1/approvals", func(w http.ResponseWriter, r *http.Request) {
+	v1.HandleFunc("GET /v1/approvals", func(w http.ResponseWriter, r *http.Request) {
 		if d.Approvals == nil {
 			writeError(w, http.StatusServiceUnavailable, "approvals not wired")
 			return
@@ -130,7 +162,7 @@ func Handler(d Deps) http.Handler {
 		listApprovals(w, r, d.Approvals)
 	})
 
-	mux.HandleFunc("POST /v1/approvals/{id}/decision", func(w http.ResponseWriter, r *http.Request) {
+	v1.HandleFunc("POST /v1/approvals/{id}/decision", func(w http.ResponseWriter, r *http.Request) {
 		if d.Approvals == nil {
 			writeError(w, http.StatusServiceUnavailable, "approvals not wired")
 			return

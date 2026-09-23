@@ -64,3 +64,36 @@ func TestDashboardRouteMounted(t *testing.T) {
 		t.Fatalf("GET / = %d", w.Code)
 	}
 }
+
+// TestBearerAuthGatesV1: with a token set, /v1/stats without a Bearer is
+// 401; with the right Bearer it passes; healthz stays public.
+func TestBearerAuthGatesV1(t *testing.T) {
+	h := Handler(Deps{AuthToken: "s3cret"})
+	// no token → 401
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/v1/stats", nil))
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("no-token /v1/stats = %d, want 401", rr.Code)
+	}
+	// wrong token → 401
+	rr = httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/stats", nil)
+	req.Header.Set("Authorization", "Bearer wrong")
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("wrong-token = %d, want 401", rr.Code)
+	}
+	// healthz public even with token set
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("healthz with auth on = %d, want 200", rr.Code)
+	}
+	// empty token = open (default LAN posture)
+	open := Handler(Deps{})
+	rr = httptest.NewRecorder()
+	open.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/v1/stats", nil))
+	if rr.Code == http.StatusUnauthorized {
+		t.Fatal("empty token must not gate /v1/*")
+	}
+}

@@ -105,6 +105,11 @@ type Config struct {
 	// default 3600; 0 disables the periodic pass).
 	MinerIntervalSecs int
 
+	// HTTPToken, when set, requires "Authorization: Bearer <token>" on
+	// every /v1/* route (constant-time compare). Empty keeps the server
+	// open — the LAN/default posture; flipping it on is how you expose
+	// the API beyond localhost.
+	HTTPToken string
 	// TelegramToken enables the Telegram interface; empty (default) keeps
 	// the whole subsystem dormant — built, wired, and one env var away.
 	TelegramToken string
@@ -173,6 +178,7 @@ func Load() Config {
 		MinerIntervalSecs: AtoiDefault(os.Getenv("AEGIS_MINER_INTERVAL"), 3600),
 
 		TelegramToken:         envTrim("AEGIS_TELEGRAM_TOKEN"),
+		HTTPToken:             envTrim("AEGIS_HTTP_TOKEN"),
 		TelegramChats:         parseInt64List(os.Getenv("AEGIS_TELEGRAM_CHATS")),
 		TelegramMode:          envOr("AEGIS_TELEGRAM_MODE", "auto"),
 		TelegramWebhookURL:    envTrim("AEGIS_TELEGRAM_WEBHOOK_URL"),

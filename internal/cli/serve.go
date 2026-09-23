@@ -94,6 +94,7 @@ func serve(ctx context.Context, tierFlag string) error {
 			Approvals: a.Store,   // HITL REST (ADR-0008)
 			Tasks:     tasks,
 			Logger:    logger,
+			AuthToken: cfg.HTTPToken, // AEGIS_HTTP_TOKEN: empty = LAN-open, set = Bearer on /v1/*
 			Dashboard: &server.DashboardDeps{ // mini status page at GET /
 				Stats: a.Store, StartedAt: time.Now(), Commit: version.Commit,
 			},

@@ -1,6 +1,7 @@
 # Changelog
 
 ## Added
+- **2026-09-23 — Optional bearer auth on /v1/\* (AEGIS_HTTP_TOKEN)**: constant-time Bearer gate for the whole API surface; empty = open (LAN default). /healthz /readyz and the dashboard stay credential-free so uptime checks never break. Enables safe exposure beyond localhost.
 - **2026-09-23 — /stats Telegram alias**: `/stats` now renders the same one-glance health payload as `/status` (runs, deflection, per-source split, rules, build) — one code path, zero duplication.
 - **2026-09-23 — MCP server mode (ADR-0014)**: `aegis mcp-server` exposes the native tool registry over MCP stdio — same tools the router serves, callable from Claude Desktop or any MCP client. Adapter maps Tool.Execute(rawJSON) to a single `input` JSON-string schema.
 - **2026-09-23 — Mini web dashboard at GET /**: self-contained HTML status page (uptime, runs/deflection, per-source breakdown, rules by state, build commit), meta-refresh 30s, no JS frameworks. Nil-stats still renders — liveness first.
