@@ -11,6 +11,7 @@ import (
 	"aegisgo/internal/engine"
 	"aegisgo/internal/store"
 	"aegisgo/internal/trace"
+	"aegisgo/internal/version"
 )
 
 // Telegram hard limits: 4096 chars per message; we cap lower and keep room
@@ -356,6 +357,7 @@ func (d *Dispatcher) statusText(ctx context.Context) string {
 	up := time.Since(d.startedAt).Round(time.Second)
 	var b strings.Builder
 	fmt.Fprintf(&b, "🩺 AegisGo status\nuptime %s\n", up)
+	fmt.Fprintf(&b, "build %s\n", version.Commit)
 	if d.stats == nil {
 		b.WriteString("stats unavailable")
 		return b.String()

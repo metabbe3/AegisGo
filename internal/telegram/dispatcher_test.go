@@ -535,6 +535,9 @@ func TestStatusCommand(t *testing.T) {
 	if !strings.Contains(got, "🩺") {
 		t.Fatalf("missing status header: %q", got)
 	}
+	if !strings.Contains(got, "build ") {
+		t.Fatalf("missing build line: %q", got)
+	}
 }
 
 // /status without stats wired degrades honestly.
