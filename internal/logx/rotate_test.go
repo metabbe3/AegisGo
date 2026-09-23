@@ -70,3 +70,41 @@ func TestRotatingWriterZeroValueNeverWrittenNoDisk(t *testing.T) {
 		t.Fatalf("file should not exist: %v", err)
 	}
 }
+
+// TestRotatingWriterErrorPaths: a path whose parent is a FILE makes
+// openLocked fail on first write; rotation failure keeps appending to the
+// current handle (log loss is worse than rotation loss).
+func TestRotatingWriterErrorPaths(t *testing.T) {
+	dir := t.TempDir()
+	// A regular file where a directory is needed: open fails.
+	blocker := filepath.Join(dir, "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	w := &RotatingWriter{Path: filepath.Join(blocker, "sub", "log")}
+	if _, err := w.Write([]byte("y")); err == nil {
+		t.Fatal("write into blocked path must fail")
+	}
+}
+
+// TestRotatingWriterWriteAfterClose: writing after Close reopens lazily —
+// the openLocked retry contract.
+func TestRotatingWriterWriteAfterClose(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.log")
+	w := &RotatingWriter{Path: path}
+	if _, err := w.Write([]byte("first")); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte("second")); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != "firstsecond" {
+		t.Fatalf("content = %q", got)
+	}
+	w.Close()
+}

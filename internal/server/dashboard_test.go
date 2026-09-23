@@ -53,3 +53,14 @@ func TestDashboardNilStatsStillRenders(t *testing.T) {
 		t.Fatal("nil stats blanked the dashboard")
 	}
 }
+
+// TestDashboardRouteMounted: the real mux mounts GET / when Dashboard is
+// provided (and still serves /healthz).
+func TestDashboardRouteMounted(t *testing.T) {
+	h := Handler(Deps{Dashboard: &DashboardDeps{Commit: "abc"}})
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/", nil))
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "AegisGo") {
+		t.Fatalf("GET / = %d", w.Code)
+	}
+}
