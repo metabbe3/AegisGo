@@ -1,6 +1,7 @@
 # Changelog
 
 ## Added
+- **2026-09-23 — Dry-run gated verdicts (ADR-0013)**: `tools.DescribeGated` rehearses the HITL flow with zero side effects — same approval row + verdict, action replaced by payload echo.
 - **2026-09-23 — Approval TTL reminders**: still-pending approvals re-announce after 30 min (and every 30 min after), same ✅/🚫 buttons — decided-from-reminder edits the newest card (ADR-0009 keys by approval id). Sources without CreatedAt never remind.
 - **2026-09-23 — Build commit in /status**: `internal/version` package + ldflags injection; /status now answers "which build is live" without shell access.
 - **2026-09-23 — SQLite sidecar backup (ADR-0012)**: daily `VACUUM INTO` snapshot at 04:30 next to the DB, retention 7 files. `backupOnce` in `internal/app/backup.go` (idempotent same-day reruns, prune best-effort). Tests: sidecar is a readable DB, retention pruning, slice-bounds guard.

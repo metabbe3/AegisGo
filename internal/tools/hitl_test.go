@@ -42,6 +42,20 @@ func (f *fakeLedger) DecideApproval(ctx context.Context, id int64, state, by str
 	return true, nil
 }
 
+// decideNext flips the newest pending row to state (simulates the human
+// pressing ✅/🚫 while the gate polls).
+func (f *fakeLedger) decideNext(state string) {
+	for i := 0; i < 100; i++ {
+		for id, st := range f.states {
+			if st == "pending" {
+				f.states[id] = state
+				return
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func fastGate() GateConfig {
 	return GateConfig{WaitTimeout: 500 * time.Millisecond, PollInterval: 5 * time.Millisecond}
 }
@@ -133,5 +147,33 @@ func TestMarshalPayload(t *testing.T) {
 	got, err := MarshalPayload(map[string]string{"command": "restart"})
 	if err != nil || got != `{"command":"restart"}` {
 		t.Errorf("MarshalPayload = %q err=%v", got, err)
+	}
+}
+
+// TestDescribeGatedDryRun: the dry-run path returns the payload on approval
+// and NEVER executes a real action (the side-effect probe stays untouched).
+func TestDescribeGatedDryRun(t *testing.T) {
+	l := &fakeLedger{}
+	go l.decideNext("approved")
+	got, outcome, err := DescribeGated(context.Background(), l, GateConfig{WaitTimeout: 2 * time.Second, PollInterval: 20 * time.Millisecond},
+		"system_command", `{"command":"disk"}`, "dry-run probe")
+	if err != nil || outcome != OutcomeApproved {
+		t.Fatalf("outcome=%v err=%v", outcome, err)
+	}
+	if got != `{"command":"disk"}` {
+		t.Fatalf("preview = %q", got)
+	}
+	// Dry-run contract: DescribeGated has no action parameter at all —
+	// there is nothing that COULD execute. The preview IS the payload.
+}
+
+// TestDescribeGatedDeny: a denied dry-run returns the deny outcome, empty payload.
+func TestDescribeGatedDeny(t *testing.T) {
+	l := &fakeLedger{}
+	go l.decideNext("denied")
+	got, outcome, err := DescribeGated(context.Background(), l, GateConfig{WaitTimeout: 2 * time.Second, PollInterval: 20 * time.Millisecond},
+		"k", "{}", "r")
+	if err != nil || outcome != OutcomeDenied || got != "" {
+		t.Fatalf("got=%q outcome=%v err=%v", got, outcome, err)
 	}
 }

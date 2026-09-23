@@ -52,6 +52,28 @@ const (
 	OutcomeShutdown GateOutcome = "shutdown"
 )
 
+// DescribeGated is the dry-run path (ADR-0013): it runs the SAME approval
+// flow as RunGated — creates the ledger row, waits for a human verdict —
+// but the action is replaced by a payload echo, so nothing executes. An
+// approver rehearses the ✅/🚫 decision with zero side effects; the
+// returned string is the exact payload that WOULD have run.
+func DescribeGated(ctx context.Context, ledger ApprovalLedger, cfg GateConfig,
+	kind, payload, reason string) (string, GateOutcome, error) {
+	var preview string
+	_, outcome, err := RunGated(ctx, ledger, cfg, kind, payload, reason,
+		func(ctx context.Context) (any, error) {
+			preview = payload
+			return struct{ DryRun bool }{DryRun: true}, nil
+		})
+	if err != nil {
+		return "", outcome, err
+	}
+	if outcome != OutcomeApproved {
+		return "", outcome, nil
+	}
+	return preview, outcome, nil
+}
+
 // RunGated executes fn only if a human approves the action first.
 // kind/payload/reason describe the action for the approver; fn is the
 // action itself. The payload is re-marshaled into the approval row, and
