@@ -418,3 +418,16 @@ func (s *Store) migrateV3() error {
 	}
 	return tx.Commit()
 }
+
+// BackupTo writes a consistent snapshot to path using SQLite's online
+// backup (VACUUM INTO): safe while the batcher keeps writing, produces
+// a fresh compact file — ideal for a daily sidecar copy.
+func (s *Store) BackupTo(ctx context.Context, path string) error {
+	// VACUUM INTO cannot run inside the batcher's transaction — use the
+	// direct connection path (same class as the inbox claims): it is a
+	// rare admin action, never request-path.
+	if _, err := s.ExecResult(ctx, "VACUUM INTO ?", path); err != nil {
+		return fmt.Errorf("backup to %s: %w", path, err)
+	}
+	return nil
+}

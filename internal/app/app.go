@@ -246,6 +246,28 @@ func startTelegram(ctx context.Context, cfg config.Config, eng *engine.Engine,
 	notif.SetEditRegistry(editReg)
 	go notif.Start(tgCtx)
 
+	// Daily SQLite sidecar backup (ADR-0012): VACUUM INTO a dated file
+	// next to the DB at 04:30, keep the newest 7. Silent success, logged
+	// failure — the digest surfaces repeated failures as stale uptime.
+	go func() {
+		now := time.Now()
+		next := time.Date(now.Year(), now.Month(), now.Day(), 4, 30, 0, 0, now.Location())
+		if !next.After(now) {
+			next = next.Add(24 * time.Hour)
+		}
+		tm := time.NewTimer(time.Until(next))
+		defer tm.Stop()
+		for {
+			select {
+			case <-tgCtx.Done():
+				return
+			case <-tm.C:
+				backupOnce(tgCtx, st, cfg.DBPath, logger)
+				tm.Reset(24 * time.Hour)
+			}
+		}
+	}()
+
 	// Daily digest (ADR-0010): one deterministic morning message per
 	// chat — uptime, runs, pending count, last decisions. No LLM.
 	dig := telegram.NewDigest(client, cfg.TelegramChats, st, st, st, logger)

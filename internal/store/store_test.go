@@ -247,3 +247,32 @@ func TestConcurrentAuditNoBusy(t *testing.T) {
 		t.Errorf("audit rows = %d, want %d (lost writes)", n, workers*perWorker)
 	}
 }
+
+// BackupTo produces a readable sidecar with the same audit rows.
+func TestBackupToSidecar(t *testing.T) {
+	s, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	ctx := t.Context()
+	s.Audit(ctx, AuditEvent{TraceID: "t1", Interface: "cli",
+		DecisionSource: "regex_router", RuleID: "uptime",
+		LatencyMS: 5, Outcome: "ok"})
+	time.Sleep(50 * time.Millisecond) // let the batcher drain
+	dir := t.TempDir()
+	path := dir + "/sidecar.db"
+	if err := s.BackupTo(ctx, path); err != nil {
+		t.Fatalf("backup: %v", err)
+	}
+	other, err := Open(path)
+	if err != nil {
+		t.Fatalf("open sidecar: %v", err)
+	}
+	defer other.Close()
+	var n int
+	other.QueryRow(ctx, "SELECT count(*) FROM audit_events").Scan(&n)
+	if n != 1 {
+		t.Fatalf("sidecar rows = %d, want 1", n)
+	}
+}
