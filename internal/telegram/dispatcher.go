@@ -51,6 +51,7 @@ type Dispatcher struct {
 
 	mu      sync.Mutex
 	buckets map[int64]*chatBucket
+	sched   *Scheduler
 }
 
 // engineRunner is the slice of *engine.Engine the dispatcher needs.
@@ -80,6 +81,7 @@ func NewDispatcher(e engineRunner, c Client, inbox *Inbox,
 	return &Dispatcher{
 		engine: e, client: c, inbox: inbox, allow: allow,
 		rules: rules, logger: logger, buckets: make(map[int64]*chatBucket),
+		sched:    NewScheduler(e, c, allowChats, logger),
 		approver: ap, startedAt: d.startedAt,
 	}
 }
@@ -110,6 +112,12 @@ func (d *Dispatcher) Process(ctx context.Context, row InboxRow) {
 		return
 	}
 
+	// /every takes arguments — prefix-match before the exact switch.
+	if strings.HasPrefix(row.Text, "/every ") {
+		d.claimAndSend(ctx, row, d.sched.Register(row.ChatID, row.Text))
+		return
+	}
+
 	switch row.Text {
 	case "/help", "/start":
 		d.claimAndSend(ctx, row, d.helpText())
@@ -125,6 +133,12 @@ func (d *Dispatcher) Process(ctx context.Context, row InboxRow) {
 		return
 	case "/history":
 		d.claimAndSend(ctx, row, d.historyText(ctx))
+		return
+	case "/scheduled":
+		d.claimAndSend(ctx, row, d.sched.List())
+		return
+	case "/unschedule":
+		d.claimAndSend(ctx, row, d.sched.Unregister(row.Text))
 		return
 	case "/deny":
 		d.claimAndSend(ctx, row, d.decideText(ctx, row, "denied"))
@@ -267,6 +281,7 @@ func formatReply(res engine.Result) string {
 func (d *Dispatcher) helpText() string {
 	return "AegisGo agent — hybrid answers.\n" +
 		"Router commands answer instantly and free: /uptime /disk /memory /hostname /kernel /who\n" +
+		"Schedule any command: /every 30m /disk · /scheduled · /unschedule #1\n" +
 		"/csv_summary <path> · /csv_head <path> [rows]\n" +
 		"/rules lists every active rule.\n" +
 		"HITL: /approvals lists pending · /approve <id> · /deny <id> (bare /approve decides the oldest).\n/status — one-glance health: runs, deflection, latency, rules.\n/reload_rules — L2 action: hot-reload router rules after approval (✅/🚫 buttons).\n" +
