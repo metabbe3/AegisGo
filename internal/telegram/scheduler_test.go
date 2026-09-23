@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -149,4 +150,24 @@ func TestEditorEnqueueAndDrain(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("editor never drained the decision edit")
+}
+
+// TestStatsAliasMatchesStatus: /stats must render the same payload as
+// /status (alias, not a second code path).
+func TestStatsAliasMatchesStatus(t *testing.T) {
+	d, _, st := dispatcherWithStore(t, fakeEngine{answer: "x"}, &fakeClient{},
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+	d.SetStats(st)
+	got := d.statusText(context.Background())
+	if !strings.Contains(got, "runs") || !strings.Contains(got, "AegisGo status") {
+		t.Fatalf("statusText = %q", got)
+	}
+	// the switch case lists both names; assert the alias is wired by source
+	src, err := os.ReadFile("dispatcher.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(src), `case "/status", "/stats":`) {
+		t.Fatal("/stats alias missing from dispatcher switch")
+	}
 }

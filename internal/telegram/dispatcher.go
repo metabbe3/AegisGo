@@ -128,7 +128,7 @@ func (d *Dispatcher) Process(ctx context.Context, row InboxRow) {
 	case "/approvals":
 		d.claimAndSend(ctx, row, d.approvalsText(ctx))
 		return
-	case "/status":
+	case "/status", "/stats":
 		d.claimAndSend(ctx, row, d.statusText(ctx))
 		return
 	case "/history":
@@ -284,7 +284,7 @@ func (d *Dispatcher) helpText() string {
 		"Schedule any command: /every 30m /disk · /scheduled · /unschedule #1\n" +
 		"/csv_summary <path> · /csv_head <path> [rows]\n" +
 		"/rules lists every active rule.\n" +
-		"HITL: /approvals lists pending · /approve <id> · /deny <id> (bare /approve decides the oldest).\n/status — one-glance health: runs, deflection, latency, rules.\n/reload_rules — L2 action: hot-reload router rules after approval (✅/🚫 buttons).\n" +
+		"HITL: /approvals lists pending · /approve <id> · /deny <id> (bare /approve decides the oldest).\n/status (alias /stats) — one-glance health: runs, deflection, latency, rules.\n/reload_rules — L2 action: hot-reload router rules after approval (✅/🚫 buttons).\n" +
 		"Anything else goes to the LLM (if enabled)."
 }
 

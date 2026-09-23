@@ -1,6 +1,7 @@
 # Changelog
 
 ## Added
+- **2026-09-23 — /stats Telegram alias**: `/stats` now renders the same one-glance health payload as `/status` (runs, deflection, per-source split, rules, build) — one code path, zero duplication.
 - **2026-09-23 — MCP server mode (ADR-0014)**: `aegis mcp-server` exposes the native tool registry over MCP stdio — same tools the router serves, callable from Claude Desktop or any MCP client. Adapter maps Tool.Execute(rawJSON) to a single `input` JSON-string schema.
 - **2026-09-23 — Mini web dashboard at GET /**: self-contained HTML status page (uptime, runs/deflection, per-source breakdown, rules by state, build commit), meta-refresh 30s, no JS frameworks. Nil-stats still renders — liveness first.
 - **2026-09-23 — Dry-run gated verdicts (ADR-0013)**: `tools.DescribeGated` rehearses the HITL flow with zero side effects — same approval row + verdict, action replaced by payload echo.
