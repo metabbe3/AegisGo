@@ -103,3 +103,50 @@ func TestSchedulerRejectsForeignChat(t *testing.T) {
 		t.Fatalf("foreign chat reply = %q", out)
 	}
 }
+
+// TestRegisterGatedAndOnDecided: build-time wiring hooks set the dispatcher
+// fields — the gated path and decision hook become live.
+func TestRegisterGatedAndOnDecided(t *testing.T) {
+	d, _, _ := dispatcherWithStore(t, fakeEngine{answer: "x"}, &fakeClient{},
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+	called := false
+	d.RegisterGated(map[string]GatedAction{})
+	d.OnDecided(func(id int64, v, by string) { called = true })
+	if d.gated == nil {
+		t.Fatal("gated map not wired")
+	}
+	if d.onDecided == nil {
+		t.Fatal("onDecided not wired")
+	}
+	d.onDecided(1, "approved", "t")
+	if !called {
+		t.Fatal("hook not invoked")
+	}
+}
+
+// TestEditorEnqueueAndDrain: NewEditor + EnqueueDecided + Run drain the
+// queue and edit the recorded push (ADR-0009 happy path).
+func TestEditorEnqueueAndDrain(t *testing.T) {
+	c := &fakeClient{}
+	reg := NewEditRegistry()
+	reg.Record(7, 1, 100) // approval 7 lives in chat 1, message 100
+	e := NewEditor(c, reg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	e.EnqueueDecided(7, "approved", "test")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	done := make(chan struct{})
+	go func() { e.Run(ctx); close(done) }()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		c.mu.Lock()
+		n := len(c.edits)
+		c.mu.Unlock()
+		if n > 0 {
+			cancel()
+			<-done
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("editor never drained the decision edit")
+}

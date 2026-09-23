@@ -30,6 +30,9 @@ type App struct {
 	Engine *engine.Engine
 	Store  *store.Store
 	Config config.Config
+	// Registry is the native tool set the router serves; cmd surfaces it
+	// to MCP clients (internal/mcpserver, ADR-0014).
+	Registry *tools.Registry
 	// Webhook is non-nil when the Telegram interface runs in webhook mode;
 	// mount it on the HTTP server (cmd wiring passes it to server.Deps).
 	Webhook http.Handler
@@ -191,10 +194,11 @@ func Build(ctx context.Context, cfg config.Config, tier config.Tier,
 		"telegram", cfg.TelegramEnabled(),
 	)
 	return &App{
-		Engine:  eng,
-		Store:   st,
-		Config:  cfg,
-		Webhook: webhook,
+		Engine:   eng,
+		Store:    st,
+		Config:   cfg,
+		Webhook:  webhook,
+		Registry: reg,
 	}, cleanup, nil
 }
 

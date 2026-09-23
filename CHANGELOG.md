@@ -1,6 +1,7 @@
 # Changelog
 
 ## Added
+- **2026-09-23 — MCP server mode (ADR-0014)**: `aegis mcp-server` exposes the native tool registry over MCP stdio — same tools the router serves, callable from Claude Desktop or any MCP client. Adapter maps Tool.Execute(rawJSON) to a single `input` JSON-string schema.
 - **2026-09-23 — Mini web dashboard at GET /**: self-contained HTML status page (uptime, runs/deflection, per-source breakdown, rules by state, build commit), meta-refresh 30s, no JS frameworks. Nil-stats still renders — liveness first.
 - **2026-09-23 — Dry-run gated verdicts (ADR-0013)**: `tools.DescribeGated` rehearses the HITL flow with zero side effects — same approval row + verdict, action replaced by payload echo.
 - **2026-09-23 — Approval TTL reminders**: still-pending approvals re-announce after 30 min (and every 30 min after), same ✅/🚫 buttons — decided-from-reminder edits the newest card (ADR-0009 keys by approval id). Sources without CreatedAt never remind.

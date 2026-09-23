@@ -24,6 +24,7 @@ const usageText = `usage: aegis <command> [args]
 commands:
   agent [--tier fast|smart] [prompt...]   one-shot prompt, or interactive REPL
   serve [--tier fast|smart]               HTTP + gRPC daemon (AEGIS_* env config)
+  mcp-server                             expose the native tool registry over MCP stdio
   ctl <rules|stats|replay> ...            offline admin tool (AEGIS_DB_PATH)
   version                                 print the build version
 `
@@ -45,6 +46,8 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		err = serveCmd(ctx, args[1:], stderr)
 	case "ctl":
 		err = runCtl(args[1:], stdout)
+	case "mcp-server":
+		err = mcpServerCmd(ctx, args[1:], stderr)
 	case "version":
 		fmt.Fprintf(stdout, "aegis %s\n", Version)
 	case "help", "-h", "--help":
