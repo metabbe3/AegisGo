@@ -1,3 +1,14 @@
+## 2026-09-25 — merge #36 feat/sse-events
+- `GET /v1/events`: SSE live run feed — one RunEvent per completed engine run (decision_source, trace_id, rule_id, latency_ms). Slow subscribers drop events; the run path never blocks on a dashboard. Heartbeat comment every 15s defeats idle-proxy reaping. Unwired = 503 like other /v1 routes.
+- `engine.WrapRun`: middleware hook around Run (one wrapper max; double-wrap panics). The engine stays SSE-unaware — serve installs the publisher.
+- Live-verified: subscribe + POST /v1/agent/run → `event: run {"decision_source":"regex_router",...latency_ms:16}` pushed <1s. Coverage 90.0% gate green.
+
+## 2026-09-25 — merge #35 feat/ctl-jobs
+- `GET /v1/jobs` + `aegis ctl jobs` (HTTP client via AEGIS_ADDR, bearer when AEGIS_HTTP_TOKEN set).
+
+## 2026-09-25 — glm flash verified on Z.ai anthropic-compat
+- One-shot live test: AEGIS_PROVIDER=anthropic + ANTHROPIC_BASE_URL=api.z.ai/api/anthropic + AEGIS_MODEL=glm-5.3-flash → rc 0, 4.6s; tier pair (smart glm-5.3 + fast flash + AEGIS_CLASSIFIER=on) works. Serving stays AEGIS_LLM=off (router-only) — switch is a deliberate operator decision, documented here.
+
 ## 2026-09-25 — merge #35 feat/ctl-jobs
 - `GET /v1/jobs`: live background-job snapshot (running first, then finished newest-first, bounded by retention). Nil-safe: idle server returns `[]` not `null`.
 - `aegis ctl jobs`: CLI client that asks the running server via `AEGIS_ADDR` (default http://localhost:8080); attaches `Authorization: Bearer` when `AEGIS_HTTP_TOKEN` is set.
