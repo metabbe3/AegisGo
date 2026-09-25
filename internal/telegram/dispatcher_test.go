@@ -582,3 +582,32 @@ func TestHistoryNoStore(t *testing.T) {
 		t.Fatalf("want unavailable, got %q", lastSend(c))
 	}
 }
+
+// TestReloadRulesDispatcherE2E: /reload_rules flows through the gated path
+// of the dispatcher — a stub GatedAction's HandleText is invoked with the
+// original text, and the dispatcher routes the command to it (not to the
+// engine). Pins the RegisterGated wiring contract (ADR-0007).
+func TestReloadRulesDispatcherE2E(t *testing.T) {
+	var gotText string
+	stub := gatedStub{fn: func(_ context.Context, text string) string {
+		gotText = text
+		return "reloaded 14 rules"
+	}}
+	d, inbox := harness(t, fakeEngine{answer: "engine-should-not-answer"}, &fakeClient{})
+	d.RegisterGated(map[string]GatedAction{"/reload_rules": stub})
+
+	feed(t, inbox, 4242, "/reload_rules sanity")
+	rows, err := inbox.Pending(context.Background(), 1)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("pending: %v %v", rows, err)
+	}
+	d.Process(context.Background(), rows[0])
+	if gotText != "/reload_rules sanity" {
+		t.Fatalf("gated text = %q, want the full command", gotText)
+	}
+}
+
+// gatedStub adapts a closure to GatedAction (HandleText contract).
+type gatedStub struct{ fn func(ctx context.Context, text string) string }
+
+func (g gatedStub) HandleText(ctx context.Context, text string) string { return g.fn(ctx, text) }
