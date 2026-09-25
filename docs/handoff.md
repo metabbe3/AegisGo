@@ -104,3 +104,24 @@ Queue terurut nilai/efort; sesi sore udah merged #25-32:
 
 Urutan malam: 1 → 2 → 3 (semua S, cepat); 4-5 kalau waktu; 6-7 riset dulu.
 Branch per fitur, changelog+ADR kalau keputusan baru, deploy build+kickstart tiap batch.
+
+## Brainstorm batch-5 (2026-09-25 malam)
+
+Audit queue batch-4: item 1 (/stats) dan 2 (ctl jobs) TERNYATA SUDAH ADA
+sejak lama (dispatcher alias "/status","/stats" + `ctl jobs` + GET /v1/jobs) —
+queue dicoret, jangan diusulkan lagi. Item 3 (MCP token) di-upgrade jadi
+transport HTTP penuh. Queue malam ini:
+
+1. **Dashboard live feed via SSE (S)** — follow-up resmi merge #36: page GET /
+   subscribe /v1/events (EventSource), prepend baris run (source · latency),
+   cap 8 baris, degrade diam tanpa JS. Meta-refresh 30s TETAP (stats angka
+   hanya refresh via reload; SSE cuma bawa run events).
+2. **/jobs di Telegram (S)** — lihat background download jobs dari chat:
+   narrow source interface (lister) + SetJobs + help + render human (bukan
+   JSON). DoD: command + test + help.
+3. **MCP streamable HTTP transport + bearer token (M)** — mcp-go v0.58 sudah
+   bawa server/streamable_http.go; expose `aegis mcp-server --http :7847`
+   dengan AEGIS_MCP_TOKEN (constant-time compare; kosong = tolak remote,
+   stdio tetap tanpa token). DoD: flag + config knob + test salah-token.
+4. (Cadangan kalau cepat) **JobManager cancel (S→M)** — CancelJob(id) +
+   context cancel di download.
