@@ -16,6 +16,7 @@ import (
 	"google.golang.org/grpc"
 
 	"aegisgo/internal/app"
+	"aegisgo/internal/engine"
 	"aegisgo/internal/config"
 	"aegisgo/internal/grpcapi"
 	"aegisgo/internal/logx"
@@ -86,6 +87,20 @@ func serve(ctx context.Context, tierFlag string) error {
 	// One task group for every detached run (REST + gRPC async answers) so
 	// shutdown can join them for real instead of guessing with a sleep.
 	tasks := &task.Group{}
+	// SSE run events: the engine itself stays unaware (no import cycle, no
+	// new hot-path dependency) — a thin wrapper publishes each completed
+	// run's metadata to /v1/events subscribers.
+	pub := server.NewEventPub()
+	a.Engine.WrapRun(func(ctx context.Context, prompt string, next func(context.Context, string) engine.Result) engine.Result {
+		res := next(ctx, prompt)
+		pub.Publish(server.RunEvent{
+			DecisionSource: res.DecisionSource,
+			TraceID:        res.TraceID,
+			RuleID:         res.RuleID,
+			LatencyMS:      res.LatencyMS,
+		})
+		return res
+	})
 	srv := &http.Server{
 		Addr: cfg.Addr,
 		Handler: server.Handler(server.Deps{
@@ -96,6 +111,7 @@ func serve(ctx context.Context, tierFlag string) error {
 			Logger:    logger,
 			AuthToken: cfg.HTTPToken, // AEGIS_HTTP_TOKEN: empty = LAN-open, set = Bearer on /v1/*
 			Jobs:      a.Jobs,        // GET /v1/jobs: live download-job snapshots
+			Events:    pub,           // GET /v1/events: SSE live run feed
 			Dashboard: &server.DashboardDeps{ // mini status page at GET /
 				Stats: a.Store, StartedAt: time.Now(), Commit: version.Commit,
 			},
