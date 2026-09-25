@@ -92,3 +92,9 @@ ids forever because the retention cap legitimately removes them.
 **Rule now:** partials are per-job temp files (os.CreateTemp) renamed on
 success; retention tests count fn completions (atomic counter) instead of
 polling ids the cap may have already reclaimed (internal/tools).
+
+### 2026-09-25 (session #36 #37)
+- **Test SSE handler dengan cancel eksplisit**: handler SSE by design blocking sampai client disconnect — test tanpa context cancel = hang sampai timeout go test. Selalu: `ctx, cancel := context.WithCancel(req.Context())` + cancel dari goroutine. (Test yang hang sempat bikin package timeout 120s.)
+- **`trace.New` return (id, ctx) dua nilai** — bukan ctx saja. Test baru yang salah asumsi langsung build fail; cek signature sebelum tulis test.
+- **engine.WrapRun: satu wrapper satu owner** — double-wrap panic by design, biar ordering surprise gak invisible. Middleware pattern tanpa import cycle (engine gak tahu SSE ada).
+- **GLM flash via Z.ai anthropic-compat verified**: ANTHROPIC_BASE_URL=api.z.ai/api/anthropic + AEGIS_MODEL=glm-5.3-flash jalan (rc 0, 4.6s). Flash mikir kelamaan buat prompt simple (thinking block) — cocok classifier/fallback, bukan jalur interaktif.
