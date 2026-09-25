@@ -688,3 +688,79 @@ func TestRunStreamingShadowExecutesToolOnce(t *testing.T) {
 		})
 	}
 }
+
+func mustCtx(t *testing.T) context.Context {
+	t.Helper()
+	_, ctx := trace.New(context.Background(), "")
+	return ctx
+}
+
+// TestWrapRun: the wrapper observes every completed run and its result
+// passes through untouched; double-wrap panics loudly.
+func TestWrapRun(t *testing.T) {
+	mkEngine := func() *Engine {
+		root := t.TempDir()
+		set, err := tools.Builtin(tools.Options{Workspace: root})
+		if err != nil {
+			t.Fatal(err)
+		}
+		reg, err := tools.NewRegistry(set...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r, err := router.New(reg, router.Seeded())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &Engine{Router: r, Model: "m"} // no LLM: misses -> llm_disabled
+	}
+
+	e := mkEngine()
+	var seen []string
+	e.WrapRun(func(ctx context.Context, prompt string, next func(context.Context, string) Result) Result {
+		res := next(ctx, prompt)
+		seen = append(seen, res.DecisionSource)
+		return res
+	})
+	traceID, ctx := trace.New(context.Background(), "")
+	_ = traceID
+	res := e.Run(ctx, "no seeded rule matches this prompt")
+	if res.DecisionSource != "llm_disabled" {
+		t.Fatalf("source = %q, want llm_disabled", res.DecisionSource)
+	}
+	if len(seen) != 1 || seen[0] != "llm_disabled" {
+		t.Fatalf("wrapper saw %v", seen)
+	}
+
+	// rewrite passthrough: caller gets the wrapper's value
+	e2 := mkEngine()
+	e2.WrapRun(func(ctx context.Context, _ string, _ func(context.Context, string) Result) Result {
+		return Result{Answer: "intercepted", DecisionSource: "test"}
+	})
+	if got := e2.Run(mustCtx(t), "x"); got.Answer != "intercepted" {
+		t.Fatalf("rewrite passthrough = %+v", got)
+	}
+
+	// double wrap must panic — one wrapper, one owner
+	e3 := mkEngine()
+	e3.WrapRun(func(ctx context.Context, p string, n func(context.Context, string) Result) Result { return n(ctx, p) })
+	defer func() {
+		if recover() == nil {
+			t.Fatal("second WrapRun must panic")
+		}
+	}()
+	e3.WrapRun(func(ctx context.Context, p string, n func(context.Context, string) Result) Result { return n(ctx, p) })
+}
+
+// TestResultHeader pins the human-facing header contract: rule present
+// includes it, absent omits, latency always shown.
+func TestResultHeader(t *testing.T) {
+	r := Result{DecisionSource: "regex_router", RuleID: "uptime", LatencyMS: 12}
+	if got := r.Header(", "); got != "[regex_router via uptime, 12ms]" {
+		t.Fatalf("with rule = %q", got)
+	}
+	r2 := Result{DecisionSource: "llm", LatencyMS: 3000}
+	if got := r2.Header(" · "); got != "[llm · 3000ms]" {
+		t.Fatalf("without rule = %q", got)
+	}
+}

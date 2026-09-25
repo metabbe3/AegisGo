@@ -77,6 +77,23 @@ type Engine struct {
 	IFace string
 	// Model names the LLM on audit rows ("" when disabled).
 	Model string
+	// runWrap, when set, replaces the un-wrapped Run body once — used by
+	// serve to publish SSE events around each run (see WrapRun). It must
+	// call the supplied inner function to actually execute the pipeline.
+	runWrap func(ctx context.Context, prompt string, next func(ctx context.Context, prompt string) Result) Result
+}
+
+// WrapRun installs a middleware around Run: fn receives the continuation
+// and MUST return its result. Setting it twice panics — one wrapper, one
+// owner, or ordering surprises become invisible.
+func (e *Engine) WrapRun(fn func(ctx context.Context, prompt string, next func(ctx context.Context, prompt string) Result) Result) {
+	if fn == nil {
+		return
+	}
+	if e.runWrap != nil {
+		panic("engine: WrapRun called twice")
+	}
+	e.runWrap = fn
 }
 
 type ifaceKey struct{}
@@ -91,6 +108,15 @@ func WithIFace(ctx context.Context, iface string) context.Context {
 // trace ID (trace.New); Router hits never touch the LLM — except shadow
 // evaluations, which deliberately run both (see Decision.Evaluate).
 func (e *Engine) Run(ctx context.Context, prompt string) Result {
+	// A run wrapper (WrapRun) may observe every completed run — used by
+	// serve to feed /v1/events without the engine knowing about SSE.
+	if e.runWrap != nil {
+		return e.runWrap(ctx, prompt, e.runUnwrapped)
+	}
+	return e.runUnwrapped(ctx, prompt)
+}
+
+func (e *Engine) runUnwrapped(ctx context.Context, prompt string) Result {
 	traceID := trace.From(ctx)
 	start := time.Now()
 

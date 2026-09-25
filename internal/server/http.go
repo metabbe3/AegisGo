@@ -72,6 +72,9 @@ type Deps struct {
 	// Jobs exposes background-job snapshots (download jobs) at
 	// GET /v1/jobs; nil = 503 (serve wires it when tools run).
 	Jobs interface{ ListJobs() []Job }
+	// Events, when non-nil, mounts GET /v1/events (SSE): one RunEvent per
+	// completed engine run, pushed live. nil = 503 like other unwired routes.
+	Events *EventPub
 	// AuthToken, when non-empty, gates every /v1/* route behind
 	// "Authorization: Bearer <token>" (constant-time). Empty = open
 	// (the LAN default). Health probes and the dashboard stay public.
@@ -147,6 +150,10 @@ func Handler(d Deps) http.Handler {
 			return
 		}
 		runAgent(w, r, d)
+	})
+
+	v1.HandleFunc("GET /v1/events", func(w http.ResponseWriter, r *http.Request) {
+		eventsHandler(w, r, d)
 	})
 
 	v1.HandleFunc("GET /v1/stats", func(w http.ResponseWriter, r *http.Request) {
