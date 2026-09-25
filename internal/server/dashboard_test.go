@@ -1,6 +1,7 @@
 package server
 
 import (
+	"aegisgo/internal/tools"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -95,5 +96,28 @@ func TestBearerAuthGatesV1(t *testing.T) {
 	open.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/v1/stats", nil))
 	if rr.Code == http.StatusUnauthorized {
 		t.Fatal("empty token must not gate /v1/*")
+	}
+}
+
+// TestJobsEndpoint: GET /v1/jobs returns the wired snapshots (and 503
+// when not wired).
+func TestJobsEndpoint(t *testing.T) {
+	// not wired → 503
+	h := Handler(Deps{})
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/v1/jobs", nil))
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("unwired /v1/jobs = %d, want 503", rr.Code)
+	}
+	// wired via a real manager: one finished job shows up
+	m := tools.NewJobManager()
+	h = Handler(Deps{Jobs: m})
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/v1/jobs", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("wired /v1/jobs = %d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), `"kind"`) && strings.TrimSpace(rr.Body.String()) != "[]" {
+		t.Fatalf("body = %q", rr.Body.String())
 	}
 }

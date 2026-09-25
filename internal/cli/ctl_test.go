@@ -9,6 +9,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -266,5 +268,56 @@ func TestReplayArgCount(t *testing.T) {
 	for _, args := range [][]string{{"replay"}, {"replay", "a", "b"}} {
 		err := runCtl(args, &buf)
 		errMustContain(t, err, "usage: aegis ctl replay <trace-id>")
+	}
+}
+
+// TestCtlJobs covers the ctl jobs client against a fake /v1/jobs server:
+// table rendering, empty state, bearer header when configured, and the
+// connection-refused error path.
+func TestCtlJobs(t *testing.T) {
+	// fake server serving one job + capturing the auth header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/jobs" {
+			http.NotFound(w, r)
+			return
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer t0k" {
+			http.Error(w, "missing bearer", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `[{"job_id":"j_ab12","kind":"download","status":"running","created_at":"2026-09-25T09:00:00Z","finished_at":"0001-01-01T00:00:00Z","error":"","meta":{},"result":null}]`)
+	}))
+	defer srv.Close()
+	t.Setenv("AEGIS_ADDR", srv.URL)
+	t.Setenv("AEGIS_HTTP_TOKEN", "t0k")
+	var out bytes.Buffer
+	if err := runCtl([]string{"jobs"}, &out); err != nil {
+		t.Fatalf("ctl jobs: %v", err)
+	}
+	if !strings.Contains(out.String(), "j_ab12") || !strings.Contains(out.String(), "running") {
+		t.Errorf("output = %q, want job row", out.String())
+	}
+
+	// empty list → friendly line, still exit 0
+	srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `[]`)
+	}))
+	defer srv2.Close()
+	t.Setenv("AEGIS_ADDR", srv2.URL)
+	out.Reset()
+	if err := runCtl([]string{"jobs"}, &out); err != nil {
+		t.Fatalf("ctl jobs empty: %v", err)
+	}
+	if !strings.Contains(out.String(), "no jobs") {
+		t.Errorf("empty output = %q", out.String())
+	}
+
+	// server down → actionable error mentioning the address
+	t.Setenv("AEGIS_ADDR", "http://127.0.0.1:1")
+	t.Setenv("AEGIS_HTTP_TOKEN", "")
+	out.Reset()
+	if err := runCtl([]string{"jobs"}, &out); err == nil {
+		t.Fatalf("ctl jobs down: want error, got nil (out=%q)", out.String())
 	}
 }

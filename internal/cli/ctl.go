@@ -1,11 +1,14 @@
 package cli
 
 import (
+	"aegisgo/internal/tools"
 	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
+	"os"
 	"strings"
 	"text/tabwriter"
 
@@ -40,6 +43,8 @@ func runCtl(args []string, stdout io.Writer) error {
 		return rulesCmd(ctx, st, cfg, args[1:], stdout)
 	case "stats":
 		return statsCmd(ctx, st, stdout)
+	case "jobs":
+		return jobsCmd(ctx, cfg, stdout)
 	case "replay":
 		if len(args) != 2 {
 			return fmt.Errorf("usage: aegis ctl replay <trace-id>")
@@ -51,7 +56,51 @@ func runCtl(args []string, stdout io.Writer) error {
 }
 
 func ctlUsage() error {
-	return fmt.Errorf("usage: aegis ctl rules list|mine|promote <name>|demote <name> | stats | replay <trace-id>")
+	return fmt.Errorf("usage: aegis ctl rules list|mine|promote <name>|demote <name> | stats | jobs | replay <trace-id>")
+}
+
+// jobsCmd lists live background jobs from the running server's GET
+// /v1/jobs (jobs are in-process state — a fresh CLI has none of its own).
+func jobsCmd(ctx context.Context, cfg config.Config, stdout io.Writer) error {
+	base := os.Getenv("AEGIS_ADDR")
+	if base == "" {
+		base = "http://localhost:8080"
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/v1/jobs", nil)
+	if err != nil {
+		return err
+	}
+	if cfg.HTTPToken != "" {
+		req.Header.Set("Authorization", "Bearer "+cfg.HTTPToken)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("querying %s/v1/jobs (is the server running?): %w", base, err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("GET /v1/jobs: %s: %s", resp.Status, body)
+	}
+	var jobs []tools.Job
+	if err := json.Unmarshal(body, &jobs); err != nil {
+		return err
+	}
+	if len(jobs) == 0 {
+		fmt.Fprintln(stdout, "no jobs (running or retained)")
+		return nil
+	}
+	for _, j := range jobs {
+		line := fmt.Sprintf("%s  %-9s %s", j.ID, j.Status, j.Kind)
+		if j.Error != "" {
+			line += "  err: " + j.Error
+		}
+		fmt.Fprintln(stdout, line)
+	}
+	return nil
 }
 
 func rulesCmd(ctx context.Context, st *store.Store, cfg config.Config, args []string, stdout io.Writer) error {

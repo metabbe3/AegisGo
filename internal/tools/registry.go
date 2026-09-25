@@ -14,6 +14,10 @@ type Options struct {
 	// Download bounds and configures the download tool. Zero values take
 	// safe defaults; negative values fail Builtin loudly.
 	Download DownloadOptions
+	// Jobs, when non-nil, is the shared JobManager downloads register into
+	// (inject one to also expose it over HTTP; nil = Builtin creates a
+	// private manager exactly as before).
+	Jobs *JobManager
 }
 
 // Builtin returns the built-in tool set. Order is stable; tools are
@@ -50,8 +54,12 @@ func Builtin(opts Options) ([]Tool, error) {
 		return nil, err
 	}
 	// One job manager serves download + job_status so started jobs are
-	// pollable through the same process.
-	jobs := NewJobManager()
+	// pollable through the same process; an injected manager (Options.Jobs)
+	// lets the caller also expose it (e.g. serve → GET /v1/jobs).
+	jobs := opts.Jobs
+	if jobs == nil {
+		jobs = NewJobManager()
+	}
 	download, err := NewDownload(opts.Workspace, jobs, opts.Download)
 	if err != nil {
 		return nil, err

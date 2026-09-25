@@ -95,6 +95,7 @@ func serve(ctx context.Context, tierFlag string) error {
 			Tasks:     tasks,
 			Logger:    logger,
 			AuthToken: cfg.HTTPToken, // AEGIS_HTTP_TOKEN: empty = LAN-open, set = Bearer on /v1/*
+			Jobs:      a.Jobs,        // GET /v1/jobs: live download-job snapshots
 			Dashboard: &server.DashboardDeps{ // mini status page at GET /
 				Stats: a.Store, StartedAt: time.Now(), Commit: version.Commit,
 			},
