@@ -1,3 +1,8 @@
+## 2026-09-25 — merge #35 feat/ctl-jobs
+- `GET /v1/jobs`: live background-job snapshot (running first, then finished newest-first, bounded by retention). Nil-safe: idle server returns `[]` not `null`.
+- `aegis ctl jobs`: CLI client that asks the running server via `AEGIS_ADDR` (default http://localhost:8080); attaches `Authorization: Bearer` when `AEGIS_HTTP_TOKEN` is set.
+- Coverage 90.0% (gate green). Tests: List ordering + adapter, endpoint 503/200, ctl client (table/empty/bearer/down).
+
 # Changelog
 
 ## Added
