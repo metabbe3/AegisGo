@@ -233,3 +233,55 @@ func TestJobStatusTool(t *testing.T) {
 		t.Errorf("result payload = %+v, want DownloadResult{Bytes:7}", execJob.Result)
 	}
 }
+
+// TestJobManagerList covers List ordering: running first (oldest→newest),
+// then finished newest-first, and the empty case.
+func TestJobManagerList(t *testing.T) {
+	// empty manager → nil/empty slice, no panic
+	mgr := NewJobManager()
+	if got := mgr.List(); len(got) != 0 {
+		t.Errorf("empty List = %+v, want none", got)
+	}
+	// two finished jobs (timestamped order enforced by CreatedAt) + one running.
+	// Jobs finish near-instantly so use distinct sleeps? No — deterministic:
+	// finish first job, then start+hold the running one, then check ordering.
+	id1 := mgr.Start(context.Background(), time.Second, "first", nil,
+		func(ctx context.Context) (any, error) { return "1", nil })
+	waitForJob(t, mgr, id1)
+	id2 := mgr.Start(context.Background(), time.Second, "second", nil,
+		func(ctx context.Context) (any, error) { return "2", nil })
+	waitForJob(t, mgr, id2)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	idR := mgr.Start(context.Background(), time.Second, "live", nil,
+		func(ctx context.Context) (any, error) {
+			close(entered)
+			<-release
+			return "r", nil
+		})
+	<-entered
+	defer close(release)
+
+	got := mgr.List()
+	if len(got) != 3 {
+		t.Fatalf("List len = %d, want 3", len(got))
+	}
+	if got[0].Status != JobRunning || got[0].ID != idR {
+		t.Errorf("first = %+v, want the running job %s", got[0], idR)
+	}
+	// finished newest-first: second before first
+	if got[1].ID != id2 || got[2].ID != id1 {
+		t.Errorf("finished order = %s,%s; want %s,%s", got[1].ID, got[2].ID, id2, id1)
+	}
+}
+
+// TestListJobsAdapter pins the server.Deps adapter: same slice as List.
+func TestListJobsAdapter(t *testing.T) {
+	mgr := NewJobManager()
+	id := mgr.Start(context.Background(), time.Second, "k", nil,
+		func(ctx context.Context) (any, error) { return "v", nil })
+	waitForJob(t, mgr, id)
+	if got := mgr.ListJobs(); len(got) != 1 || got[0].ID != id {
+		t.Errorf("ListJobs = %+v, want one job %s", got, id)
+	}
+}

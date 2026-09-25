@@ -69,6 +69,9 @@ type Deps struct {
 	// Dashboard, when non-nil, mounts the mini status page at GET /
 	// (nil keeps / unmounted — embedders choose).
 	Dashboard *DashboardDeps
+	// Jobs exposes background-job snapshots (download jobs) at
+	// GET /v1/jobs; nil = 503 (serve wires it when tools run).
+	Jobs interface{ ListJobs() []Job }
 	// AuthToken, when non-empty, gates every /v1/* route behind
 	// "Authorization: Bearer <token>" (constant-time). Empty = open
 	// (the LAN default). Health probes and the dashboard stay public.
@@ -148,6 +151,18 @@ func Handler(d Deps) http.Handler {
 
 	v1.HandleFunc("GET /v1/stats", func(w http.ResponseWriter, r *http.Request) {
 		statsHandler(w, r, d)
+	})
+
+	v1.HandleFunc("GET /v1/jobs", func(w http.ResponseWriter, r *http.Request) {
+		if d.Jobs == nil {
+			writeError(w, http.StatusServiceUnavailable, "jobs not wired")
+			return
+		}
+		jobs := d.Jobs.ListJobs()
+		if jobs == nil {
+			jobs = []Job{} // JSON: [] not null
+		}
+		writeJSON(w, http.StatusOK, jobs)
 	})
 
 	v1.HandleFunc("GET /v1/answers/{trace}", func(w http.ResponseWriter, r *http.Request) {

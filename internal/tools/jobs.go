@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -102,6 +103,24 @@ func (m *JobManager) evictFinishedLocked() {
 	}
 }
 
+// List returns snapshots of all jobs: running first (oldest first),
+// then finished newest-first. Bounded by maxFinishedJobs by construction.
+func (m *JobManager) List() []Job {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var running, done []Job
+	for _, j := range m.jobs {
+		if j.Status == JobRunning {
+			running = append(running, *j)
+		} else {
+			done = append(done, *j)
+		}
+	}
+	sort.Slice(running, func(a, b int) bool { return running[a].CreatedAt.Before(running[b].CreatedAt) })
+	sort.Slice(done, func(a, b int) bool { return done[a].CreatedAt.After(done[b].CreatedAt) })
+	return append(running, done...)
+}
+
 // Get returns a copy of the job, if still retained.
 func (m *JobManager) Get(id string) (Job, bool) {
 	m.mu.RLock()
@@ -173,3 +192,7 @@ func NewJobStatus(mgr *JobManager) (Tool, error) {
 		return j.output(), nil
 	})
 }
+
+// ListJobs satisfies the server.Deps.Jobs interface (adapter so the
+// HTTP layer never imports the concrete manager).
+func (m *JobManager) ListJobs() []Job { return m.List() }

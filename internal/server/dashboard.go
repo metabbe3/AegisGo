@@ -1,6 +1,7 @@
 package server
 
 import (
+	"aegisgo/internal/tools"
 	"fmt"
 	"net/http"
 	"strings"
@@ -71,3 +72,6 @@ h1{font-size:1.1rem} .card{border:1px solid #ddd;border-radius:8px;padding:.8rem
 		fmt.Fprint(w, b.String())
 	}
 }
+
+// Job re-exports the tools.Job snapshot for Deps.Jobs consumers.
+type Job = tools.Job

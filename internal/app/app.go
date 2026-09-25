@@ -33,6 +33,9 @@ type App struct {
 	// Registry is the native tool set the router serves; cmd surfaces it
 	// to MCP clients (internal/mcpserver, ADR-0014).
 	Registry *tools.Registry
+	// Jobs is the shared background-job manager (downloads); serve
+	// exposes it at GET /v1/jobs.
+	Jobs *tools.JobManager
 	// Webhook is non-nil when the Telegram interface runs in webhook mode;
 	// mount it on the HTTP server (cmd wiring passes it to server.Deps).
 	Webhook http.Handler
@@ -49,6 +52,7 @@ func Build(ctx context.Context, cfg config.Config, tier config.Tier,
 		return nil, nil, fmt.Errorf("opening store: %w", err)
 	}
 
+	jobs := tools.NewJobManager()
 	set, err := tools.Builtin(tools.Options{
 		Workspace: cfg.WorkspaceDir(),
 		SQL:       tools.SQLOptions{DSN: cfg.SQLDSN, Path: cfg.DBPath, Mode: cfg.SQLMode},
@@ -57,6 +61,7 @@ func Build(ctx context.Context, cfg config.Config, tier config.Tier,
 			MaxBytes:     cfg.DownloadMaxBytes,
 			AllowPrivate: cfg.DownloadAllowPrivate,
 		},
+		Jobs: jobs,
 	})
 	if err != nil {
 		st.Close()
@@ -199,6 +204,7 @@ func Build(ctx context.Context, cfg config.Config, tier config.Tier,
 		Config:   cfg,
 		Webhook:  webhook,
 		Registry: reg,
+		Jobs:     jobs,
 	}, cleanup, nil
 }
 
