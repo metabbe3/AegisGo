@@ -97,8 +97,8 @@ Queue terurut nilai/efort; sesi sore udah merged #25-32:
 1. **/stats di Telegram (S)** — versi teks web dashboard: runs/deflection/by-source/rules-by-state/build. Dispatcher render dari statser yang udah ada. DoD: command + test + help text.
 2. **aegis ctl jobs (S)** — inspect background download jobs (list/status). Manager udah ada di internal/tools/jobs.go. DoD: subcommand ctl + test.
 3. **MCP bearer token utk HTTP/SSE transport (S→M)** — stdio lokal aman; remote perlu AEGIS_MCP_TOKEN + constant-time compare. DoD: config knob + middleware + test salah-token 401.
-4. **/reload_rules dari chat (S)** — gate + diff preview udah ada (ADR-0007/0011); tinggal register handler dispatcher. DoD: wiring + test end-to-end approve→reload.
-5. **SSE dashboard live (M)** — meta-refresh 30s → event-stream push. DoD: /v1/events + dashboard subscribe + test.
+4. ~~reload_rules dari chat~~ ✅ CLOSED 25 Sep (merge #37): wiring udah ada sejak awal; E2E dispatcher test sekarang pin contract-nya. Follow-up opsi: bot live test /reload_rules via @KyociPersonalBot.
+5. ~~SSE dashboard live~~ ✅ DONE 25 Sep (merge #36): /v1/events live-verified (regex_router event <1s); dashboard JS subscribe = follow-up.
 6. **Rule mining v2 (M)** — multi-pattern synthesis dari corpus. Jaga invariant #12: hanya path-arg tools, divergence selalu demote. DoD: proposal format + test.
 7. **Store WAL checkpoint tuning (M)** — ukur batcher p99 dulu; tuning hanya kalau data bilang perlu. DoD: benchmark script + hasil tercatat.
 
