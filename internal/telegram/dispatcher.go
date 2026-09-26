@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -44,6 +45,8 @@ type Dispatcher struct {
 	stats statser
 	// hist backs /history (nil = command reports unavailable).
 	hist historian
+	// jobs backs /jobs (nil = command reports unavailable).
+	jobs joblister
 	// startedAt anchors the /status uptime line.
 	startedAt time.Time
 	// onDecided fires after a successful decision (edit pushed message).
@@ -133,6 +136,9 @@ func (d *Dispatcher) Process(ctx context.Context, row InboxRow) {
 		return
 	case "/history":
 		d.claimAndSend(ctx, row, d.historyText(ctx))
+		return
+	case "/jobs":
+		d.claimAndSend(ctx, row, d.jobsText())
 		return
 	case "/scheduled":
 		d.claimAndSend(ctx, row, d.sched.List())
@@ -285,6 +291,7 @@ func (d *Dispatcher) helpText() string {
 		"/csv_summary <path> · /csv_head <path> [rows]\n" +
 		"/rules lists every active rule.\n" +
 		"HITL: /approvals lists pending · /approve <id> · /deny <id> (bare /approve decides the oldest).\n/status (alias /stats) — one-glance health: runs, deflection, latency, rules.\n/reload_rules — L2 action: hot-reload router rules after approval (✅/🚫 buttons).\n" +
+		"/jobs — background download jobs: id, state, age.\n" +
 		"Anything else goes to the LLM (if enabled)."
 }
 
@@ -417,6 +424,27 @@ func (d *Dispatcher) statusText(ctx context.Context) string {
 // SetHistory wires the decisions source for /history.
 func (d *Dispatcher) SetHistory(h historian) { d.hist = h }
 
+// joblister is the background-jobs slice /jobs needs. The tools.JobManager
+// satisfies it via ListJobs; the narrow interface keeps the dispatcher free
+// of internal/tools.
+type joblister interface {
+	ListJobs() []Job
+}
+
+// Job is the dispatcher-side view of a background job (mirrors
+// tools.Job's fields without the import): id, state, age, and the source
+// URL when the job is a download.
+type Job struct {
+	ID        string
+	Kind      string
+	Status    string
+	Meta      map[string]string
+	CreatedAt time.Time
+}
+
+// SetJobs wires the background-jobs source for /jobs.
+func (d *Dispatcher) SetJobs(j joblister) { d.jobs = j }
+
 // historyText renders /history: the latest decisions, newest-first.
 // Human lines only — verdict icon, what, who, when.
 func (d *Dispatcher) historyText(ctx context.Context) string {
@@ -453,4 +481,52 @@ func (d *Dispatcher) historyText(ctx context.Context) string {
 		fmt.Fprintf(&b, "%s #%d %s — by %s · %s\n", icon, a.ID, humanKind(a.Kind), who, when)
 	}
 	return b.String()
+}
+
+// jobsText renders /jobs: the newest background jobs, newest-first, capped.
+// Job ids carry an underscore (j_ab12cd34) — chat text spells them without
+// (owner rule: no underscores in bot replies).
+func (d *Dispatcher) jobsText() string {
+	if d.jobs == nil {
+		return "Jobs unavailable (no manager wired)."
+	}
+	jobs := d.jobs.ListJobs()
+	if len(jobs) == 0 {
+		return "No background jobs. Downloads started via the agent appear here."
+	}
+	// The manager orders running-then-done; the chat wants overall newest
+	// first — sort a copy (jobs is already a slice of values from ListJobs).
+	sort.Slice(jobs, func(a, b int) bool { return jobs[a].CreatedAt.After(jobs[b].CreatedAt) })
+	if len(jobs) > 8 {
+		jobs = jobs[:8]
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "⬇️ Latest %d background jobs (newest first):\n", len(jobs))
+	for _, job := range jobs {
+		icon := "•"
+		switch job.Status {
+		case "running":
+			icon = "⏳"
+		case "done":
+			icon = "✅"
+		case "error":
+			icon = "❌"
+		}
+		id := strings.TrimPrefix(job.ID, "j_")
+		what := jobMeta(job)
+		age := time.Since(job.CreatedAt).Round(time.Second)
+		fmt.Fprintf(&b, "%s %s — %s · %s ago\n", icon, id, what, age)
+	}
+	return b.String()
+}
+
+// jobMeta picks the friendliest label for a job row: the source URL when
+// present, else the job kind. Kept small: jobs today are downloads.
+func jobMeta(job Job) string {
+	if job.Meta != nil {
+		if u := job.Meta["url"]; u != "" {
+			return u
+		}
+	}
+	return job.Kind
 }

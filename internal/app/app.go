@@ -166,7 +166,7 @@ func Build(ctx context.Context, cfg config.Config, tier config.Tier,
 	var stopTelegram func()
 	if cfg.TelegramEnabled() {
 		var err error
-		webhook, stopTelegram, err = startTelegram(ctx, cfg, eng, st, rt, logger)
+		webhook, stopTelegram, err = startTelegram(ctx, cfg, eng, st, rt, jobs, logger)
 		if err != nil {
 			cleanup()
 			return nil, nil, err
@@ -213,7 +213,8 @@ func Build(ctx context.Context, cfg config.Config, tier config.Tier,
 // fails startup loudly; an empty chat allowlist warns but boots (the bot
 // will skip everything until configured — secure default).
 func startTelegram(ctx context.Context, cfg config.Config, eng *engine.Engine,
-	st *store.Store, rt *router.Router, logger *slog.Logger) (http.Handler, func(), error) {
+	st *store.Store, rt *router.Router, jobs *tools.JobManager,
+	logger *slog.Logger) (http.Handler, func(), error) {
 
 	client := telegram.NewHTTPClient(cfg.TelegramToken, cfg.TelegramAPIBase)
 	botName, err := client.GetMe(ctx)
@@ -312,6 +313,9 @@ func startTelegram(ctx context.Context, cfg config.Config, eng *engine.Engine,
 	dispatcher.SetStats(st)
 	dispatcher.SetHistory(st)
 
+	// /jobs shares the job manager REST already serves (GET /v1/jobs).
+	dispatcher.SetJobs(jobsSource{jobs})
+
 	// Decision edits: drain queue → EditMessageText on recorded targets.
 	ed := telegram.NewEditor(client, editReg, logger)
 	dispatcher.OnDecided(ed.EnqueueDecided)
@@ -356,6 +360,20 @@ func startTelegram(ctx context.Context, cfg config.Config, eng *engine.Engine,
 
 // approvalSourceShim adapts *store.Store to telegram.ApprovalSource.
 type approvalSourceShim struct{ st *store.Store }
+
+// jobsSource adapts *tools.JobManager to the dispatcher's narrow joblister
+// (telegram stays import-free of internal/tools; conversion is field-by-field).
+type jobsSource struct{ m *tools.JobManager }
+
+func (s jobsSource) ListJobs() []telegram.Job {
+	js := s.m.ListJobs()
+	out := make([]telegram.Job, len(js))
+	for i, j := range js {
+		out[i] = telegram.Job{ID: j.ID, Kind: j.Kind, Status: j.Status,
+			Meta: j.Meta, CreatedAt: j.CreatedAt}
+	}
+	return out
+}
 
 func (s *approvalSourceShim) PendingApprovals(ctx context.Context, limit int) ([]telegram.ApprovalInfo, error) {
 	rows, err := s.st.PendingApprovals(ctx, limit)
