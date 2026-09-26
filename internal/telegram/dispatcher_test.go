@@ -608,6 +608,8 @@ func TestReloadRulesDispatcherE2E(t *testing.T) {
 }
 
 // gatedStub adapts a closure to GatedAction (HandleText contract).
-type gatedStub struct{ fn func(ctx context.Context, text string) string }
+type gatedStub struct {
+	fn func(ctx context.Context, text string) string
+}
 
 func (g gatedStub) HandleText(ctx context.Context, text string) string { return g.fn(ctx, text) }

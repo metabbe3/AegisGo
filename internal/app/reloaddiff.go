@@ -20,9 +20,9 @@ type ReloadDiffGate struct {
 // diffRules renders the change set between the live rule set and the
 // one a reload would install. Lines are human words, no JSON:
 //
-//	+ new-rule (Pattern → tool)
-//	− dropped-rule
-//	~ changed-rule: pattern or tool moved
+//   - new-rule (Pattern → tool)
+//     − dropped-rule
+//     ~ changed-rule: pattern or tool moved
 func diffRules(live, next []router.RuleDef) string {
 	liveIdx := make(map[string]router.RuleDef, len(live))
 	for _, r := range live {
