@@ -1,3 +1,9 @@
+## 2026-09-27 (ops, agent-utama)
+
+- PROD LLM ON (opsi A, owner approval): AEGIS_LLM=on, provider anthropic → https://api.z.ai/api/anthropic, smart=glm-5.3, fast=glm-5.3-flash, classifier=on. launchd plist updated + service restarted.
+- Binary deployed: be89c9d → **5bf6bb4** (main; menutup deploy-lag merges #38-40 — Evolution #17/#18).
+- FIX saat switch: 401 dari z.ai → akar masalah dua token di ~/.hermes/.env; yang valid utk z.ai = ANTHROPIC_API_KEY (49ch). AUTH_TOKEN (119ch) = 401, dihapus dari plist. Recipe dicatat di aegisgo.env comments.
+- VERIFY E2E: /uptime → regex_router 19ms zero-cost tetap; prompt bebas → decision_source=llm glm-5.3 via z.ai 11.5s OK; healthz/readyz ok; WIP feat/job-cancel di-restore utuh (stash pop).
 ## 2026-09-25 — merge #36 feat/sse-events
 - `GET /v1/events`: SSE live run feed — one RunEvent per completed engine run (decision_source, trace_id, rule_id, latency_ms). Slow subscribers drop events; the run path never blocks on a dashboard. Heartbeat comment every 15s defeats idle-proxy reaping. Unwired = 503 like other /v1 routes.
 - `engine.WrapRun`: middleware hook around Run (one wrapper max; double-wrap panics). The engine stays SSE-unaware — serve installs the publisher.
