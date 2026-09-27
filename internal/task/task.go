@@ -21,6 +21,15 @@ type Group struct {
 // its values (trace IDs) and is bounded by timeout: a background task must
 // outlive the HTTP request that started it, yet never run forever.
 func (g *Group) Go(parent context.Context, timeout time.Duration, fn func(ctx context.Context)) {
+	g.GoCancel(parent, timeout, fn)
+}
+
+// GoCancel is Go with the cancel function handed back to the caller: the
+// goroutine's context can be canceled on demand (JobManager.Cancel) while
+// the timeout stays the hard bound. The returned cancel is idempotent, so
+// callers may fire it late or never without leaking — context's own
+// deadline cancel runs on the goroutine's defer either way.
+func (g *Group) GoCancel(parent context.Context, timeout time.Duration, fn func(ctx context.Context)) func() {
 	g.wg.Add(1)
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), timeout)
 	go func() {
@@ -28,6 +37,7 @@ func (g *Group) Go(parent context.Context, timeout time.Duration, fn func(ctx co
 		defer cancel()
 		fn(ctx)
 	}()
+	return cancel
 }
 
 // Wait blocks until every goroutine started with Go has finished, or d
