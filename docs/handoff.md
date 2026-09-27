@@ -125,3 +125,8 @@ transport HTTP penuh. Queue malam ini:
    stdio tetap tanpa token). DoD: flag + config knob + test salah-token.
 4. (Cadangan kalau cepat) **JobManager cancel (S→M)** — CancelJob(id) +
    context cancel di download.
+
+## 2026-09-28 00:2x (agent-utama, night shift)
+- Merged #41-#43 sudah changelog lengkap; PUSH origin main selesai (utang clear).
+- Utang tersisa: E2E happy-path lokal (AEGIS_DOWNLOAD_ALLOW_PRIVATE=on + slow local server) — belum dijalankan; Builder 21:30 jalan normal.
+- AEGIS_LLM=on (z.ai glm via API_KEY 49-char) tetap hidup; AUTH_TOKEN jangan dipakai (401).
