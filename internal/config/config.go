@@ -110,6 +110,12 @@ type Config struct {
 	// open — the LAN/default posture; flipping it on is how you expose
 	// the API beyond localhost.
 	HTTPToken string
+	// MCPToken gates the MCP streamable-HTTP transport (AEGIS_MCP_TOKEN,
+	// constant-time compare). Unlike HTTPToken, empty REFUSES to serve
+	// remotely: stdio stays token-free because the spawning client is
+	// already local, while an HTTP listener is reachable by anything on
+	// the network.
+	MCPToken string
 	// TelegramToken enables the Telegram interface; empty (default) keeps
 	// the whole subsystem dormant — built, wired, and one env var away.
 	TelegramToken string
@@ -179,6 +185,7 @@ func Load() Config {
 
 		TelegramToken:         envTrim("AEGIS_TELEGRAM_TOKEN"),
 		HTTPToken:             envTrim("AEGIS_HTTP_TOKEN"),
+		MCPToken:              envTrim("AEGIS_MCP_TOKEN"),
 		TelegramChats:         parseInt64List(os.Getenv("AEGIS_TELEGRAM_CHATS")),
 		TelegramMode:          envOr("AEGIS_TELEGRAM_MODE", "auto"),
 		TelegramWebhookURL:    envTrim("AEGIS_TELEGRAM_WEBHOOK_URL"),

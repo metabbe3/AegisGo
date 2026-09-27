@@ -1,3 +1,7 @@
+## 2026-09-27 — merge #43 feat/mcp-http
+
+- `aegis mcp-server --http <addr>`: MCP streamable-HTTP transport (ADR-0015) — same tool registry as stdio, stateless mode, for remote MCP clients. Gated by REQUIRED `AEGIS_MCP_TOKEN` (constant-time Bearer compare, 401 before any JSON-RPC parses; empty token refuses to serve — unlike `AEGIS_HTTP_TOKEN`, this surface can drive `system_command`). stdio unchanged, token-free. Verified end-to-end with a real mcp-go streamable-HTTP client: initialize → tools/list → tools/call round-trip.
+
 ## 2026-09-27 — chore/db-hygiene
 
 - Untracked the stray `aegisgo.db` from git (a one-shot `aegis agent` run had seeded a live DB into the repo root — tracked AND modified in-tree) and added `*.db`/`*.db-shm`/`*.db-wal` to .gitignore. Guard test `scripts/gitdb_test.go` fails if any SQLite file ever reappears in `git ls-files`. The real DB lives outside the repo via `AEGIS_DB_PATH`.

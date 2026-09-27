@@ -24,7 +24,9 @@ const usageText = `usage: aegis <command> [args]
 commands:
   agent [--tier fast|smart] [prompt...]   one-shot prompt, or interactive REPL
   serve [--tier fast|smart]               HTTP + gRPC daemon (AEGIS_* env config)
-  mcp-server                             expose the native tool registry over MCP stdio
+  mcp-server [--http addr]               expose the native tool registry over MCP
+                                         stdio (default), or streamable HTTP
+                                         (--http requires AEGIS_MCP_TOKEN)
   ctl <rules|stats|replay> ...            offline admin tool (AEGIS_DB_PATH)
   version                                 print the build version
 `
