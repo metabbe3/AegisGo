@@ -188,6 +188,7 @@ AEGIS_LLM=off bin/aegis agent /csv_head testdata/sample.csv 1
 | `ANTHROPIC_API_KEY`, `FOUNDRY_ENDPOINT` | other providers |
 | `AEGIS_WORKSPACE` | root file tools may read — security boundary |
 | `AEGIS_MCP_SERVERS` | external MCP servers (stdio/HTTP) |
+| `AEGIS_MCP_TOKEN` | REQUIRED bearer token for `mcp-server --http` (empty refuses to serve remotely; stdio needs no token) |
 | `AEGIS_DB_PATH` | embedded SQLite file (audit, rules, answers) |
 | `AEGIS_SQL_DSN` / `AEGIS_SQL_MODE` | sql_query backend / `ro`\|`rw` |
 | `AEGIS_RULES_RELOAD` | rules hot-reload seconds (0 = off) |
