@@ -14,6 +14,12 @@ coverage.*
 .env
 .env.*
 
+# Local SQLite DBs — a stray one-shot `aegis agent` run must never join a
+# commit (the live DB lives outside the repo, in aegisgo-growth)
+*.db
+*.db-shm
+*.db-wal
+
 # Editor / OS
 .DS_Store
 .idea/
