@@ -313,8 +313,9 @@ func startTelegram(ctx context.Context, cfg config.Config, eng *engine.Engine,
 	dispatcher.SetStats(st)
 	dispatcher.SetHistory(st)
 
-	// /jobs shares the job manager REST already serves (GET /v1/jobs).
+	// /jobs and /cancel_job share the job manager REST already serves.
 	dispatcher.SetJobs(jobsSource{jobs})
+	dispatcher.SetJobCancel(jobsSource{jobs})
 
 	// Decision edits: drain queue → EditMessageText on recorded targets.
 	ed := telegram.NewEditor(client, editReg, logger)
@@ -373,6 +374,12 @@ func (s jobsSource) ListJobs() []telegram.Job {
 			Meta: j.Meta, CreatedAt: j.CreatedAt}
 	}
 	return out
+}
+
+func (s jobsSource) CancelJob(id string) (telegram.Job, bool, bool) {
+	j, known, issued := s.m.CancelJob(id)
+	return telegram.Job{ID: j.ID, Kind: j.Kind, Status: j.Status,
+		Meta: j.Meta, CreatedAt: j.CreatedAt}, known, issued
 }
 
 func (s *approvalSourceShim) PendingApprovals(ctx context.Context, limit int) ([]telegram.ApprovalInfo, error) {

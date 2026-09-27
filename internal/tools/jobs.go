@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -17,9 +18,10 @@ import (
 // tools package stays store-free, and a "running" job genuinely differs from
 // a "pending" answer — a job holds a goroutine and filesystem resources.
 const (
-	JobRunning = "running"
-	JobDone    = "done"
-	JobError   = "error"
+	JobRunning   = "running"
+	JobDone      = "done"
+	JobError     = "error"
+	JobCancelled = "cancelled"
 )
 
 // maxFinishedJobs bounds how many finished jobs stay queryable. Bounded
@@ -50,12 +52,13 @@ type JobManager struct {
 	mu       sync.RWMutex
 	jobs     map[string]*Job
 	finished []string // finish order, oldest first — drives retention eviction
+	cancels  map[string]func()
 	tasks    task.Group
 }
 
 // NewJobManager returns an empty manager.
 func NewJobManager() *JobManager {
-	return &JobManager{jobs: make(map[string]*Job)}
+	return &JobManager{jobs: make(map[string]*Job), cancels: make(map[string]func())}
 }
 
 // Start registers a running job and launches fn on its own goroutine,
@@ -72,7 +75,7 @@ func (m *JobManager) Start(parent context.Context, timeout time.Duration,
 	m.jobs[id] = &Job{ID: id, Kind: kind, Status: JobRunning, CreatedAt: time.Now(), Meta: meta}
 	m.mu.Unlock()
 
-	m.tasks.Go(parent, timeout, func(ctx context.Context) {
+	cancel := m.tasks.GoCancel(parent, timeout, func(ctx context.Context) {
 		res, err := fn(ctx)
 		m.mu.Lock()
 		defer m.mu.Unlock()
@@ -83,15 +86,53 @@ func (m *JobManager) Start(parent context.Context, timeout time.Duration,
 			if err != nil {
 				j.Status = JobError
 				j.Error = err.Error()
+				// ctx is this goroutine's own context: Canceled can only
+				// mean Cancel fired it (parents are detached, the deadline
+				// surfaces as DeadlineExceeded). Report the honest status
+				// instead of a cryptic "context canceled" error string.
+				if errors.Is(ctx.Err(), context.Canceled) {
+					j.Status = JobCancelled
+					j.Error = "cancelled"
+				}
 			} else {
 				j.Status = JobDone
 				j.Result = res
 			}
 		}
+		delete(m.cancels, id)
 		m.finished = append(m.finished, id)
 		m.evictFinishedLocked()
 	})
+	m.mu.Lock()
+	// Skip storing when the goroutine already finished (fast fn): a stale
+	// cancel entry for a done job would outlive eviction. The wrapper's
+	// delete ran under this same lock, so the check is race-free.
+	if j, ok := m.jobs[id]; ok && j.Status == JobRunning {
+		m.cancels[id] = cancel
+	}
+	m.mu.Unlock()
 	return id
+}
+
+// Cancel aborts a still-running job by canceling its context. It reports
+// the job snapshot, whether the id is known, and whether a cancellation
+// was actually issued (false for unknown ids and for jobs already
+// finished — cancelling those is an honest no-op, never an error). The
+// status flip to "cancelled" happens in the job's own wrapper goroutine,
+// the single writer of job outcomes.
+func (m *JobManager) Cancel(id string) (Job, bool, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	j, ok := m.jobs[id]
+	if !ok {
+		return Job{}, false, false
+	}
+	cancel, live := m.cancels[id]
+	if j.Status != JobRunning || !live {
+		return *j, true, false
+	}
+	cancel()
+	return *j, true, true
 }
 
 // evictFinishedLocked drops the oldest finished jobs beyond the retention
@@ -196,3 +237,6 @@ func NewJobStatus(mgr *JobManager) (Tool, error) {
 // ListJobs satisfies the server.Deps.Jobs interface (adapter so the
 // HTTP layer never imports the concrete manager).
 func (m *JobManager) ListJobs() []Job { return m.List() }
+
+// CancelJob adapts Cancel to the server.Deps.Jobs / telegram surfaces.
+func (m *JobManager) CancelJob(id string) (Job, bool, bool) { return m.Cancel(id) }

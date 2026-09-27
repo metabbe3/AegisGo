@@ -47,6 +47,8 @@ type Dispatcher struct {
 	hist historian
 	// jobs backs /jobs (nil = command reports unavailable).
 	jobs joblister
+	// jobCancel backs /cancel_job (nil = command reports unavailable).
+	jobCancel jobcanceler
 	// startedAt anchors the /status uptime line.
 	startedAt time.Time
 	// onDecided fires after a successful decision (edit pushed message).
@@ -121,6 +123,13 @@ func (d *Dispatcher) Process(ctx context.Context, row InboxRow) {
 		return
 	}
 
+	// Argument-taking command: prefix arm BEFORE the switch so the exact
+	// case can never shadow it (same ordering rule as /every).
+	if strings.HasPrefix(row.Text, "/cancel_job ") {
+		d.claimAndSend(ctx, row, d.cancelJobText(strings.TrimSpace(strings.TrimPrefix(row.Text, "/cancel_job "))))
+		return
+	}
+
 	switch row.Text {
 	case "/help", "/start":
 		d.claimAndSend(ctx, row, d.helpText())
@@ -139,6 +148,9 @@ func (d *Dispatcher) Process(ctx context.Context, row InboxRow) {
 		return
 	case "/jobs":
 		d.claimAndSend(ctx, row, d.jobsText())
+		return
+	case "/cancel_job":
+		d.claimAndSend(ctx, row, d.cancelJobText(""))
 		return
 	case "/scheduled":
 		d.claimAndSend(ctx, row, d.sched.List())
@@ -292,6 +304,7 @@ func (d *Dispatcher) helpText() string {
 		"/rules lists every active rule.\n" +
 		"HITL: /approvals lists pending · /approve <id> · /deny <id> (bare /approve decides the oldest).\n/status (alias /stats) — one-glance health: runs, deflection, latency, rules.\n/reload_rules — L2 action: hot-reload router rules after approval (✅/🚫 buttons).\n" +
 		"/jobs — background download jobs: id, state, age.\n" +
+		"/cancel_job <id> — stop a running download (id from /jobs).\n" +
 		"Anything else goes to the LLM (if enabled)."
 }
 
@@ -431,6 +444,13 @@ type joblister interface {
 	ListJobs() []Job
 }
 
+// jobcanceler is the cancel half of the /jobs surface. Split from joblister
+// so a source can be list-only (jobsText renders without cancel) — the app
+// wires one adapter implementing both.
+type jobcanceler interface {
+	CancelJob(id string) (Job, bool, bool)
+}
+
 // Job is the dispatcher-side view of a background job (mirrors
 // tools.Job's fields without the import): id, state, age, and the source
 // URL when the job is a download.
@@ -444,6 +464,10 @@ type Job struct {
 
 // SetJobs wires the background-jobs source for /jobs.
 func (d *Dispatcher) SetJobs(j joblister) { d.jobs = j }
+
+// SetJobCancel wires the cancel source for /cancel_job (optional — the
+// command degrades honestly when absent, like every other source).
+func (d *Dispatcher) SetJobCancel(c jobcanceler) { d.jobCancel = c }
 
 // historyText renders /history: the latest decisions, newest-first.
 // Human lines only — verdict icon, what, who, when.
@@ -511,6 +535,8 @@ func (d *Dispatcher) jobsText() string {
 			icon = "✅"
 		case "error":
 			icon = "❌"
+		case "cancelled":
+			icon = "🛑"
 		}
 		id := strings.TrimPrefix(job.ID, "j_")
 		what := jobMeta(job)
@@ -529,4 +555,27 @@ func jobMeta(job Job) string {
 		}
 	}
 	return job.Kind
+}
+
+// cancelJobText renders /cancel_job <id>: honest typed outcomes, human
+// words, ids without the j_ prefix (owner rule: no underscores in chat).
+func (d *Dispatcher) cancelJobText(id string) string {
+	if id == "" {
+		return "Usage: /cancel_job <id> — the id /jobs lists (without the j prefix)."
+	}
+	if d.jobCancel == nil {
+		return "Cancel unavailable (no manager wired)."
+	}
+	if !strings.HasPrefix(id, "j_") {
+		id = "j_" + id // /jobs renders ids bare; accept both spellings
+	}
+	_, known, issued := d.jobCancel.CancelJob(id)
+	switch {
+	case !known:
+		return "Unknown job " + strings.TrimPrefix(id, "j_") + ". Jobs live only inside the running server; /jobs lists current ones."
+	case issued:
+		return "🛑 Cancel sent for job " + strings.TrimPrefix(id, "j_") + ". It stops within moments; /jobs shows the final state."
+	default:
+		return "Job " + strings.TrimPrefix(id, "j_") + " already finished — nothing to cancel. /jobs shows its final state."
+	}
 }

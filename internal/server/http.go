@@ -48,6 +48,23 @@ type Readiness interface {
 	Ping(ctx context.Context) error
 }
 
+// JobStore is the background-jobs surface the REST API needs: list
+// snapshots, cancel a running one. *tools.JobManager satisfies it via
+// adapters; keeping it named (not inline) lets both surfaces grow
+// together without churning every Deps literal in tests.
+type JobStore interface {
+	ListJobs() []Job
+	CancelJob(id string) (Job, bool, bool)
+}
+
+// cancelJobResponse is the POST /v1/jobs/{id}/cancel body: the snapshot
+// taken at cancel time (still "running" — the flip happens in the job's
+// own goroutine) plus whether a cancellation was actually issued.
+type cancelJobResponse struct {
+	Job
+	CancelIssued bool `json:"cancel_issued"`
+}
+
 // Deps bundles the handler dependencies.
 type Deps struct {
 	Engine    Engine
@@ -70,8 +87,9 @@ type Deps struct {
 	// (nil keeps / unmounted — embedders choose).
 	Dashboard *DashboardDeps
 	// Jobs exposes background-job snapshots (download jobs) at
-	// GET /v1/jobs; nil = 503 (serve wires it when tools run).
-	Jobs interface{ ListJobs() []Job }
+	// GET /v1/jobs and cancels a running one at POST /v1/jobs/{id}/cancel;
+	// nil = 503 (serve wires it when tools run).
+	Jobs JobStore
 	// Events, when non-nil, mounts GET /v1/events (SSE): one RunEvent per
 	// completed engine run, pushed live. nil = 503 like other unwired routes.
 	Events *EventPub
@@ -170,6 +188,24 @@ func Handler(d Deps) http.Handler {
 			jobs = []Job{} // JSON: [] not null
 		}
 		writeJSON(w, http.StatusOK, jobs)
+	})
+
+	// POST /v1/jobs/{id}/cancel — abort a running background job. The
+	// status flip lands asynchronously in the job's own goroutine, so the
+	// response carries the pre-cancel snapshot plus "cancel issued": the
+	// honest wire shape for a fire-then-converge operation.
+	v1.HandleFunc("POST /v1/jobs/{id}/cancel", func(w http.ResponseWriter, r *http.Request) {
+		if d.Jobs == nil {
+			writeError(w, http.StatusServiceUnavailable, "jobs not wired")
+			return
+		}
+		id := r.PathValue("id")
+		j, known, issued := d.Jobs.CancelJob(id)
+		if !known {
+			writeError(w, http.StatusNotFound, "unknown job "+id)
+			return
+		}
+		writeJSON(w, http.StatusOK, cancelJobResponse{Job: j, CancelIssued: issued})
 	})
 
 	v1.HandleFunc("GET /v1/answers/{trace}", func(w http.ResponseWriter, r *http.Request) {
