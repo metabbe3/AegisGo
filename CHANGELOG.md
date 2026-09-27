@@ -1,3 +1,7 @@
+## 2026-09-27 — chore/db-hygiene
+
+- Untracked the stray `aegisgo.db` from git (a one-shot `aegis agent` run had seeded a live DB into the repo root — tracked AND modified in-tree) and added `*.db`/`*.db-shm`/`*.db-wal` to .gitignore. Guard test `scripts/gitdb_test.go` fails if any SQLite file ever reappears in `git ls-files`. The real DB lives outside the repo via `AEGIS_DB_PATH`.
+
 ## 2026-09-27 (ops, agent-utama)
 
 - PROD LLM ON (opsi A, owner approval): AEGIS_LLM=on, provider anthropic → https://api.z.ai/api/anthropic, smart=glm-5.3, fast=glm-5.3-flash, classifier=on. launchd plist updated + service restarted.
