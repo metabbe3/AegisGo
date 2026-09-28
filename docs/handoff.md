@@ -167,3 +167,10 @@ transport HTTP penuh. Queue malam ini:
 - /addrule allowlist += analyze_log → owner wiring command baru dari chat tanpa rebuild.
 - PENTING: AEGIS_WORKSPACE belum di-set di plist → workspace = cwd launchd. Log di luar itu ditolak containment. TODO #49: set AEGIS_WORKSPACE eksplisit.
 - Flaky test TestTelegramSetWebhookFails/TempDir cleanup — race di cleanup macOS, lulus standalone 5/5; jangan di-"fix" dengan menghapus assertion.
+
+
+## 2026-09-28 — agent utama (merge #49 ops-forecast)
+- Barusan: internal/opsforecast + tool #11 ops_forecast (deterministic forecast err_rate/req_rate/latency_p95 + recommended_action); coverage 90.1% hijau.
+- In-flight: seeded rule /forecast → INSERT manual ke rules DB (DB lama tidak auto-seed) + deploy binary + live-test via Telegram.
+- Jebakan: make cover pipeline exit code tertelan kalau di-pipe tail — grep FAIL eksplisit; registry test hardcodes tool count (update saat nambah tool).
+- Langkah pertama slot berikutnya: INSERT rule /forecast (python sqlite3, bukan shell) → make build → kickstart → /forecast live check → push.

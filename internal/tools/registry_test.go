@@ -87,7 +87,7 @@ func TestBuiltinSetAndOrder(t *testing.T) {
 	// Seeded order mirrors registry.go Builtin; tools are appended, never
 	// reordered, so provider tool lists stay diffable.
 	want := []string{"read_csv", "csv_stats", "read_doc", "system_command", "sql_query",
-		"make_dir", "list_dir", "download", "job_status", "analyze_log"}
+		"make_dir", "list_dir", "download", "job_status", "analyze_log", "ops_forecast"}
 	if len(set) != len(want) {
 		t.Fatalf("Builtin() = %d tools, want %d", len(set), len(want))
 	}
