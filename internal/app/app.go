@@ -346,6 +346,17 @@ func startTelegram(ctx context.Context, cfg config.Config, eng *engine.Engine,
 	}
 	dispatcher.SetWatch(wgate.HandleWatchText)
 
+	// Deterministic log analysis family (owner 28 Sep): /api_perf
+	// /exceptions /access /audit /behaviour — zero LLM.
+	lagate := &LogAnalysisGate{
+		QueryAuditRows: func(ctx context.Context, n int) ([]map[string]any, error) {
+			return st.QueryMaps(ctx,
+				`SELECT interface, decision_source, rule_id, outcome, latency_ms, confidence, tokens_in, tokens_out
+				 FROM audit_events ORDER BY rowid DESC LIMIT ?`, n)
+		},
+	}
+	dispatcher.SetLogAnalysis(lagate.HandleText)
+
 	// /jobs and /cancel_job share the job manager REST already serves.
 	dispatcher.SetJobs(jobsSource{jobs})
 	dispatcher.SetJobCancel(jobsSource{jobs})

@@ -267,7 +267,7 @@ func TestHelpAndRules(t *testing.T) {
 		t.Fatalf("sends = %d, want 2", c.sendCount())
 	}
 	// Help contract: markdown-formatted, every command family present.
-	for _, want := range []string{"*AegisGo*", "/uptime", "/watch ", "/analyze", "/addrule", "/reload_rules", "/status"} {
+	for _, want := range []string{"*AegisGo*", "/uptime", "/watch ", "/analyze", "/addrule", "/reload_rules", "/status", "/api_perf", "/audit"} {
 		if !strings.Contains(c.sends[0], want) {
 			t.Errorf("help missing %q", want)
 		}
