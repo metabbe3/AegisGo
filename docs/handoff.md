@@ -159,3 +159,11 @@ transport HTTP penuh. Queue malam ini:
 - internal/loganalysis: AnalyzeAPIPerf (p50/p95/slowest/5xx, normalizeRoute id-collapse), AnalyzeExceptions (template), AnalyzeAccess (IP/route/status/agent), AnalyzeAuditRows (dari QueryMaps audit_events), AnalyzeBehaviour (cmd/hour/burst/novel).
 - LESSON RE2: lookahead (?!) dan backreference (\1) gak ada di Go — vet manual pasca-match; ini nangkep 2 panic compile saat test pertama.
 - /audit = self-transparency: agent bisa di-audit performanya sendiri (conf avg, latency, error%) — nutup loop "trust" NORTH STAR.
+
+## 2026-09-28 siang — merge #48 analyze_log + wiring (owner-direct)
+- feat/log-analysis → main ddd76d4; vet, 24/24, cover 90.0%, check.
+- analyze_log = tool bawaan ke-10: kind perf|exceptions|access|behaviour; resolvePath containment (Hard Rule 2 CLOSED — Telegram gates dulu bypass via os.Open).
+- Seeded rules → command jalan instan dari Telegram/HTTP/CLI (router, zero LLM); gates Telegram delegasi ke tool (satu code path).
+- /addrule allowlist += analyze_log → owner wiring command baru dari chat tanpa rebuild.
+- PENTING: AEGIS_WORKSPACE belum di-set di plist → workspace = cwd launchd. Log di luar itu ditolak containment. TODO #49: set AEGIS_WORKSPACE eksplisit.
+- Flaky test TestTelegramSetWebhookFails/TempDir cleanup — race di cleanup macOS, lulus standalone 5/5; jangan di-"fix" dengan menghapus assertion.
