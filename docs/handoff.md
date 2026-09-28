@@ -152,3 +152,10 @@ transport HTTP penuh. Queue malam ini:
 - TELEGRAM: /watch /unwatch /watchlist /analyze (markdown), SendMarkdown opt-in — jawaban engine TETAP plain (anti parse-error), /help baru grouped sections.
 - LESSON hari ini: (1) import cycle store↔logwatch — schema string milik store yang menjalankan; (2) coverage per-pkg menutup mata terhadap adapter yang dites dari pkg lain → -coverpkg; (3) test-driven menangkap 3 bug nyata: pipe-in-regex, volatile-key mask order (UUID sebelum key), name min-2-char.
 - Makefile cover: -coverpkg cross-package (89.8 → 90.1).
+
+## 2026-09-28 sore — merge #47 log analysis family (owner-direct)
+- feat/log-analysis → main; vet, 24/24, cover 90.0%, check.
+- COMMANDS: /api_perf /exceptions /access /audit /behaviour — semua deterministic, LLM=0.
+- internal/loganalysis: AnalyzeAPIPerf (p50/p95/slowest/5xx, normalizeRoute id-collapse), AnalyzeExceptions (template), AnalyzeAccess (IP/route/status/agent), AnalyzeAuditRows (dari QueryMaps audit_events), AnalyzeBehaviour (cmd/hour/burst/novel).
+- LESSON RE2: lookahead (?!) dan backreference (\1) gak ada di Go — vet manual pasca-match; ini nangkep 2 panic compile saat test pertama.
+- /audit = self-transparency: agent bisa di-audit performanya sendiri (conf avg, latency, error%) — nutup loop "trust" NORTH STAR.
