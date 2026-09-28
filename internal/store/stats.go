@@ -152,3 +152,57 @@ func (s *Store) Replay(ctx context.Context, traceID string) ([]AuditTrail, error
 			return a, nil
 		}, traceID)
 }
+
+// HealthSnapshot is the self-audit surface behind /health (Telegram) —
+// outcome quality per decision source, not just counts: error share and
+// average confidence expose whether the router's zero-cost deflection is
+// actually answering correctly (NORTH STAR: trust + data reliable).
+type HealthSnapshot struct {
+	TotalRuns int `json:"total_runs"`
+	Errors    int `json:"errors"`
+	// BySource: source -> {runs, errors, avg latency ms, avg confidence}.
+	BySource map[string]SourceHealth `json:"by_source"`
+}
+
+// SourceHealth is one decision source's outcome rollup.
+type SourceHealth struct {
+	Runs       int     `json:"runs"`
+	Errors     int     `json:"errors"`
+	AvgLatency float64 `json:"avg_latency_ms"`
+	AvgConf    float64 `json:"avg_confidence"`
+}
+
+// Health aggregates audit_events by decision_source with outcome + latency
+// + confidence. The confidence column is NOT NULL DEFAULT 0 (audit v6), so
+// pre-#44 rows average in as 0 — an honest signal of how much of the trail
+// predates scoring, not a bug to paper over.
+func (s *Store) Health(ctx context.Context) (*HealthSnapshot, error) {
+	type row struct {
+		src    string
+		n      int
+		errs   int
+		avgLat float64
+		avgC   float64
+	}
+	rows, err := QueryAll(ctx, s,
+		`SELECT decision_source, COUNT(*),
+			SUM(CASE WHEN outcome='error' THEN 1 ELSE 0 END),
+			AVG(latency_ms), AVG(confidence)
+		 FROM audit_events GROUP BY decision_source`,
+		func(r *sql.Rows) (row, error) {
+			var v row
+			return v, r.Scan(&v.src, &v.n, &v.errs, &v.avgLat, &v.avgC)
+		})
+	if err != nil {
+		return nil, err
+	}
+	out := &HealthSnapshot{BySource: map[string]SourceHealth{}}
+	for _, v := range rows {
+		out.BySource[v.src] = SourceHealth{
+			Runs: v.n, Errors: v.errs, AvgLatency: v.avgLat, AvgConf: v.avgC,
+		}
+		out.TotalRuns += v.n
+		out.Errors += v.errs
+	}
+	return out, nil
+}

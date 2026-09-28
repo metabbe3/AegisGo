@@ -264,6 +264,7 @@ The router serves it instantly everywhere (Telegram/HTTP/CLI) — the /api_perf 
 
 **🛠 Admin (HITL-gated)**
 - `/status` · `/approvals` · `/approve <id>` · `/deny <id>`
+- `/health` — self-audit: error share + avg confidence + latency per decision source
 - `/reload_rules` (✅/🚫 gated) — hot-reload router rules
 - `/addrule name=X | pattern=/x | tool=read_doc | args={"path":"docs/$1"}` — add a router rule from chat (gated; tools: `read_csv` `csv_stats` `read_doc`)
 

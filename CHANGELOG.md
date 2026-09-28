@@ -1,3 +1,7 @@
+## 2026-09-28 — merge #50 feat/health-command
+
+- `/health` (Telegram): the agent audits its own answer quality — error share, avg confidence, avg latency per decision source, plus an unknown-source catch-all. Backed by `store.Health()` (outcome-aware GROUP BY over audit_events; confidence averages include pre-#44 rows as 0 — an honest signal of the unscored trail, documented in-code). Wired via the narrow-interface pattern of record (healther + SetHealth, honest degrade when unwired). Help + README synced.
+
 ## 2026-09-27 — merge #43 feat/mcp-http
 
 - `aegis mcp-server --http <addr>`: MCP streamable-HTTP transport (ADR-0015) — same tool registry as stdio, stateless mode, for remote MCP clients. Gated by REQUIRED `AEGIS_MCP_TOKEN` (constant-time Bearer compare, 401 before any JSON-RPC parses; empty token refuses to serve — unlike `AEGIS_HTTP_TOKEN`, this surface can drive `system_command`). stdio unchanged, token-free. Verified end-to-end with a real mcp-go streamable-HTTP client: initialize → tools/list → tools/call round-trip.
