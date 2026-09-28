@@ -259,6 +259,8 @@ type runResponse struct {
 	DecisionSource string `json:"decision_source"`
 	TraceID        string `json:"trace_id"`
 	LatencyMS      int64  `json:"latency_ms"`
+	Confidence     int    `json:"confidence"`
+	ConfBand       string `json:"confidence_band"`
 }
 
 // decodeRunRequest parses and validates the run body shared by the sync and
@@ -320,6 +322,8 @@ func runAgent(w http.ResponseWriter, r *http.Request, d Deps) {
 		DecisionSource: res.DecisionSource,
 		TraceID:        res.TraceID,
 		LatencyMS:      res.LatencyMS,
+		Confidence:     res.Confidence.Score,
+		ConfBand:       res.Confidence.Band,
 	})
 }
 
@@ -352,6 +356,8 @@ func runAgentStream(w http.ResponseWriter, r *http.Request, d Deps) {
 	})
 	_ = sseWrite(w, fl, "done", map[string]any{
 		"decision_source": res.DecisionSource,
+		"confidence":      res.Confidence.Score,
+		"confidence_band": res.Confidence.Band,
 		"rule_id":         res.RuleID,
 		"trace_id":        res.TraceID,
 		"latency_ms":      res.LatencyMS,

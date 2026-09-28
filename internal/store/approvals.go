@@ -189,3 +189,24 @@ func (s *Store) RecentDecisions(ctx context.Context, limit int) ([]Approval, err
 	}
 	return out, rows.Err()
 }
+
+// migrateV6 adds the confidence column to audit_events (decision engine,
+// owner directive 28 Sep). Existing rows keep 0 = "scored before the
+// feature existed"; new rows always carry a score.
+func (s *Store) migrateV6() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	stmts := []string{
+		`ALTER TABLE audit_events ADD COLUMN confidence INTEGER NOT NULL DEFAULT 0`,
+		`PRAGMA user_version = 6`,
+	}
+	for _, stmt := range stmts {
+		if _, err := tx.Exec(stmt); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("migrating to v6: %w", err)
+		}
+	}
+	return tx.Commit()
+}
