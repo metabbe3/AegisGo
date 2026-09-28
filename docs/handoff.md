@@ -174,3 +174,9 @@ transport HTTP penuh. Queue malam ini:
 - In-flight: seeded rule /forecast → INSERT manual ke rules DB (DB lama tidak auto-seed) + deploy binary + live-test via Telegram.
 - Jebakan: make cover pipeline exit code tertelan kalau di-pipe tail — grep FAIL eksplisit; registry test hardcodes tool count (update saat nambah tool).
 - Langkah pertama slot berikutnya: INSERT rule /forecast (python sqlite3, bukan shell) → make build → kickstart → /forecast live check → push.
+
+## 2026-09-28 15:18 — agent utama (#49 DEPLOYED)
+- Barusan: binary baru live (PID 56383, repo bin/aegis — cp ke ~/.hermes/bin KENA Gatekeeper Killed-9, JANGAN cp; plist masih arah ~/.hermes/bin/aegis-serve → owner perlu re-point ke repo bin ATAU re-sign), rules DB /forecast 3 bentuk urut specific→general, hot-reload verified.
+- Live: /forecast + metric=/threshold= → regex_router 0ms HIGH; changelog==merge; queue sync 35.
+- Jebakan: args_template named-group $p DITOLAK engine (harus $1 positional); cp binary lintas path = Gatekeeper kill.
+- Next: scaling executor via system_command catalog + HITL gate (ADR-0005/0008) bila owner approve.
