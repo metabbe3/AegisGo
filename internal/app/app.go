@@ -319,6 +319,7 @@ func startTelegram(ctx context.Context, cfg config.Config, eng *engine.Engine,
 	// /status + /history share the store REST already serves.
 	dispatcher.SetStats(st)
 	dispatcher.SetHistory(st)
+	dispatcher.SetHealth(st)
 
 	// 24/7 log watchdog (owner 28 Sep): watches live in SQLite, goroutine
 	// per watch, alerts → owner chat, add/remove from chat without rebuild.

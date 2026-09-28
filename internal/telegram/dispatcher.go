@@ -48,6 +48,8 @@ type Dispatcher struct {
 	gated map[string]GatedAction
 	// stats backs /status (nil = command reports unavailable).
 	stats statser
+	// health backs /health self-audit (nil = command reports unavailable).
+	health healther
 	// hist backs /history (nil = command reports unavailable).
 	hist historian
 	// jobs backs /jobs (nil = command reports unavailable).
@@ -150,6 +152,9 @@ func (d *Dispatcher) Process(ctx context.Context, row InboxRow) {
 		return
 	case "/history":
 		d.claimAndSend(ctx, row, d.historyText(ctx))
+		return
+	case "/health":
+		d.claimAndSend(ctx, row, d.healthText(ctx))
 		return
 	case "/jobs":
 		d.claimAndSend(ctx, row, d.jobsText())
@@ -361,6 +366,7 @@ func (d *Dispatcher) helpText() string {
 		"`/behaviour <path>` — actions, peak hours, bursts\n\n" +
 		"*🛠 Admin (HITL)*\n" +
 		"`/status` — health ringkas\n" +
+		"`/health` — self-audit: errors & confidence per source\n" +
 		"`/approvals` · `/approve <id>` · `/deny <id>`\n" +
 		"`/reload_rules` — hot-reload rules (✅/🚫)\n" +
 		"`/addrule name=X | pattern=/x | tool=read_doc | args={\"path\":\"docs/$1\"}`\n\n" +
@@ -386,6 +392,14 @@ type historian interface {
 }
 
 var _ historian = (*store.Store)(nil)
+
+// healther is the self-audit slice /health needs (the store already
+// implements it; a narrow interface keeps the dispatcher testable).
+type healther interface {
+	Health(ctx context.Context) (*store.HealthSnapshot, error)
+}
+
+var _ healther = (*store.Store)(nil)
 
 // statser is the stats slice /status needs (the store already
 // implements it — stats.Snapshot via store.Stats).
@@ -497,6 +511,70 @@ func (d *Dispatcher) statusText(ctx context.Context) string {
 
 // SetHistory wires the decisions source for /history.
 func (d *Dispatcher) SetHistory(h historian) { d.hist = h }
+
+// SetHealth wires the self-audit source for /health.
+func (d *Dispatcher) SetHealth(h healther) { d.health = h }
+
+// healthText renders /health: the agent audits its own answer quality —
+// error share and confidence per decision source. A high error share on a
+// trusted source is exactly the thing /status's run counts hide.
+func (d *Dispatcher) healthText(ctx context.Context) string {
+	var b strings.Builder
+	b.WriteString("🧪 AegisGo self-audit\n")
+	if d.health == nil {
+		b.WriteString("health data unavailable")
+		return b.String()
+	}
+	snap, err := d.health.Health(ctx)
+	if err != nil {
+		b.WriteString("health data error: " + err.Error())
+		return b.String()
+	}
+	if snap.TotalRuns == 0 {
+		b.WriteString("no runs recorded yet")
+		return b.String()
+	}
+	errPct := 0.0
+	if snap.TotalRuns > 0 {
+		errPct = float64(snap.Errors) / float64(snap.TotalRuns) * 100
+	}
+	fmt.Fprintf(&b, "runs %d · errors %d (%.1f%%)\n", snap.TotalRuns, snap.Errors, errPct)
+	labels := map[string]string{
+		"regex_router":   "Router",
+		"llm_classifier": "Fast tier",
+		"llm":            "LLM",
+		"llm_disabled":   "LLM off",
+		"error":          "Errors",
+	}
+	order := []string{"regex_router", "llm_classifier", "llm", "llm_disabled", "error"}
+	seen := 0
+	for _, src := range order {
+		h, ok := snap.BySource[src]
+		if !ok {
+			continue
+		}
+		line := fmt.Sprintf("%s %d runs", labels[src], h.Runs)
+		if h.Errors > 0 {
+			line += fmt.Sprintf(" · %d err", h.Errors)
+		}
+		line += fmt.Sprintf(" · %.0fms", h.AvgLatency)
+		if h.AvgConf > 0 {
+			line += fmt.Sprintf(" · conf %.0f", h.AvgConf)
+		}
+		b.WriteString(line + "\n")
+		seen++
+	}
+	// Any source outside the known five (future decision paths) still shows.
+	if seen < len(snap.BySource) {
+		for src, h := range snap.BySource {
+			if _, known := labels[src]; known {
+				continue
+			}
+			fmt.Fprintf(&b, "%s %d runs · %.0fms\n", src, h.Runs, h.AvgLatency)
+		}
+	}
+	return b.String()
+}
 
 // SetLogAnalysis wires the deterministic analysis command family.
 func (d *Dispatcher) SetLogAnalysis(f func(ctx context.Context, text string) string) {
