@@ -240,3 +240,9 @@ func TestStartWatchesWithNotifyPump(t *testing.T) {
 		t.Fatal("pump never notified")
 	}
 }
+
+func TestPluralHelper(t *testing.T) {
+	if plural(1) != "" || plural(0) != "es" || plural(3) != "es" {
+		t.Fatal("plural")
+	}
+}

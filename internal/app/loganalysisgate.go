@@ -13,6 +13,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -20,10 +21,53 @@ import (
 	"aegisgo/internal/loganalysis"
 )
 
-// LogAnalysisGate wires the commands to the store (for /audit).
+// LogAnalysisGate wires the commands to the store (for /audit) and the
+// analyze_log tool (for every path-taking command — containment lives
+// inside the tool, so the Telegram path and the router path share it).
 type LogAnalysisGate struct {
 	// QueryAuditRows returns the last N audit rows as maps.
 	QueryAuditRows func(ctx context.Context, n int) ([]map[string]any, error)
+	// ExecTool runs a registry tool by name (analyze_log); nil makes
+	// path commands fall back to direct-file analysis (tests).
+	ExecTool func(ctx context.Context, name string, args map[string]any) (any, error)
+}
+
+// analyzeViaTool runs analyze_log and renders its summary; false when
+// the tool path is unavailable.
+func (g *LogAnalysisGate) analyzeViaTool(ctx context.Context, kind, path string, n int) (string, bool) {
+	if g.ExecTool == nil {
+		return "", false
+	}
+	out, err := g.ExecTool(ctx, "analyze_log", map[string]any{
+		"path": path, "kind": kind, "max_lines": n,
+	})
+	if err != nil {
+		return "⚠️ " + err.Error(), true
+	}
+	// tool returns its flat output struct; render generically
+	return fmt.Sprintf("📊 `%s` (%s)\n%s", path, kind, summarizeToolOutput(out)), true
+}
+
+// summarizeToolOutput renders the tool's flat output struct.
+func summarizeToolOutput(out any) string {
+	switch o := out.(type) {
+	case map[string]any:
+		if s, ok := o["summary"].(string); ok {
+			return s
+		}
+	}
+	// struct form (tools.AnalyzeLogToolOutput) — reflect-free render:
+	b, err := json.Marshal(out)
+	if err != nil {
+		return fmt.Sprintf("%v", out)
+	}
+	var m map[string]any
+	if json.Unmarshal(b, &m) == nil {
+		if s, ok := m["summary"].(string); ok {
+			return s
+		}
+	}
+	return string(b)
 }
 
 // pathAndN parses "<path> [-n 500]" shared by four commands.
@@ -64,6 +108,9 @@ func (g *LogAnalysisGate) HandleText(ctx context.Context, text string) string {
 		if err != nil {
 			return "⚠️ " + err.Error()
 		}
+		if s, done := g.analyzeViaTool(ctx, "perf", path, n); done {
+			return s
+		}
 		r, err := loganalysis.AnalyzeAPIPerf(path, n)
 		if err != nil {
 			return "⚠️ " + err.Error()
@@ -79,6 +126,9 @@ func (g *LogAnalysisGate) HandleText(ctx context.Context, text string) string {
 		if err != nil {
 			return "⚠️ " + err.Error()
 		}
+		if s, done := g.analyzeViaTool(ctx, "exceptions", path, n); done {
+			return s
+		}
 		r, err := loganalysis.AnalyzeExceptions(path, n)
 		if err != nil {
 			return "⚠️ " + err.Error()
@@ -91,6 +141,9 @@ func (g *LogAnalysisGate) HandleText(ctx context.Context, text string) string {
 		path, n, err := pathAndN(rest, 500)
 		if err != nil {
 			return "⚠️ " + err.Error()
+		}
+		if s, done := g.analyzeViaTool(ctx, "access", path, n); done {
+			return s
 		}
 		r, err := loganalysis.AnalyzeAccess(path, n)
 		if err != nil {
@@ -128,6 +181,9 @@ func (g *LogAnalysisGate) HandleText(ctx context.Context, text string) string {
 		path, n, err := pathAndN(rest, 1000)
 		if err != nil {
 			return "⚠️ " + err.Error()
+		}
+		if s, done := g.analyzeViaTool(ctx, "behaviour", path, n); done {
+			return s
 		}
 		r, err := loganalysis.AnalyzeBehaviour(path, n)
 		if err != nil {

@@ -171,3 +171,24 @@ func TestStatsAliasMatchesStatus(t *testing.T) {
 		t.Fatal("/stats alias missing from dispatcher switch")
 	}
 }
+
+// TestStatusTextNilStatsAndBySource: cover the nil-stats and source-breakdown
+// branches statusText has (the happy path is covered above).
+func TestStatusTextNilStatsAndBySource(t *testing.T) {
+	d, _, _ := dispatcherWithStore(t, fakeEngine{answer: "x"}, &fakeClient{},
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+	// stats not wired → nil branch
+	if got := d.statusText(context.Background()); !strings.Contains(got, "stats unavailable") {
+		t.Fatalf("nil stats = %q", got)
+	}
+}
+
+// TestDecideTextNoApprover: nil approver branch of decideText.
+func TestDecideTextNoApprover(t *testing.T) {
+	d, _, _ := dispatcherWithStore(t, fakeEngine{answer: "x"}, &fakeClient{},
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+	got := d.decideText(context.Background(), InboxRow{Text: "/approve"}, "approve")
+	if !strings.Contains(got, "Approvals unavailable") {
+		t.Fatalf("decideText = %q", got)
+	}
+}

@@ -5,6 +5,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -167,7 +168,7 @@ func Build(ctx context.Context, cfg config.Config, tier config.Tier,
 	var stopTelegram func()
 	if cfg.TelegramEnabled() {
 		var err error
-		webhook, stopTelegram, err = startTelegram(ctx, cfg, eng, st, rt, jobs, logger)
+		webhook, stopTelegram, err = startTelegram(ctx, cfg, eng, st, rt, jobs, reg, logger)
 		if err != nil {
 			cleanup()
 			return nil, nil, err
@@ -214,7 +215,7 @@ func Build(ctx context.Context, cfg config.Config, tier config.Tier,
 // fails startup loudly; an empty chat allowlist warns but boots (the bot
 // will skip everything until configured — secure default).
 func startTelegram(ctx context.Context, cfg config.Config, eng *engine.Engine,
-	st *store.Store, rt *router.Router, jobs *tools.JobManager,
+	st *store.Store, rt *router.Router, jobs *tools.JobManager, reg *tools.Registry,
 	logger *slog.Logger) (http.Handler, func(), error) {
 
 	client := telegram.NewHTTPClient(cfg.TelegramToken, cfg.TelegramAPIBase)
@@ -328,6 +329,22 @@ func startTelegram(ctx context.Context, cfg config.Config, eng *engine.Engine,
 			return st.QueryMaps(ctx, q, args...)
 		},
 	}
+	// analyze_log as the single code path for the /api_perf family:
+	// Telegram gates call the SAME tool the router serves (containment
+	// via resolvePath inside the tool — Hard Rule 2 now holds everywhere).
+	execTool := func(ctx context.Context, name string, args map[string]any) (any, error) {
+		t, ok := reg.Get(name)
+		if !ok {
+			return nil, fmt.Errorf("tool %s not found", name)
+		}
+		raw, err := json.Marshal(args)
+		if err != nil {
+			return nil, err
+		}
+		return t.Execute(ctx, raw)
+	}
+	_ = execTool
+
 	wgate := &WatchGate{
 		Mgr:   watchMgr,
 		Store: watchStore,
@@ -347,13 +364,16 @@ func startTelegram(ctx context.Context, cfg config.Config, eng *engine.Engine,
 	dispatcher.SetWatch(wgate.HandleWatchText)
 
 	// Deterministic log analysis family (owner 28 Sep): /api_perf
-	// /exceptions /access /audit /behaviour — zero LLM.
+	// /exceptions /access /audit /behaviour — zero LLM. Path reads
+	// delegate to the analyze_log TOOL (same resolvePath containment
+	// as every other file tool — Hard Rule 2).
 	lagate := &LogAnalysisGate{
 		QueryAuditRows: func(ctx context.Context, n int) ([]map[string]any, error) {
 			return st.QueryMaps(ctx,
 				`SELECT interface, decision_source, rule_id, outcome, latency_ms, confidence, tokens_in, tokens_out
 				 FROM audit_events ORDER BY rowid DESC LIMIT ?`, n)
 		},
+		ExecTool: execTool,
 	}
 	dispatcher.SetLogAnalysis(lagate.HandleText)
 

@@ -111,7 +111,7 @@ func parseAddRule(text string) (*ruleSpec, error) {
 // check — three entries, a map is overkill.
 func addableTool(t string) bool {
 	switch t {
-	case "read_csv", "csv_stats", "read_doc":
+	case "read_csv", "csv_stats", "read_doc", "analyze_log":
 		return true
 	}
 	return false
@@ -134,7 +134,7 @@ func (g *AddRuleGate) Request(ctx context.Context, spec *ruleSpec) (int64, error
 // runtime state.
 func (g *AddRuleGate) Run(ctx context.Context, spec *ruleSpec) (any, error) {
 	if !addableTool(spec.Tool) {
-		return nil, fmt.Errorf("add_rule: tool %q not addable from chat (allowed: read_csv, csv_stats, read_doc)", spec.Tool)
+		return nil, fmt.Errorf("add_rule: tool %q not addable from chat (allowed: read_csv, csv_stats, read_doc, analyze_log)", spec.Tool)
 	}
 	args := spec.Args
 	if args == "" {
@@ -166,7 +166,7 @@ func (g *AddRuleGate) Handle(ctx context.Context, text string) (any, tools.GateO
 		return nil, "", err // parse errors surface pre-approval, no row created
 	}
 	if !addableTool(spec.Tool) {
-		return nil, "", fmt.Errorf("add_rule: tool %q not addable from chat (allowed: read_csv, csv_stats, read_doc)", spec.Tool)
+		return nil, "", fmt.Errorf("add_rule: tool %q not addable from chat (allowed: read_csv, csv_stats, read_doc, analyze_log)", spec.Tool)
 	}
 	id, err := g.Request(ctx, spec)
 	if err != nil {

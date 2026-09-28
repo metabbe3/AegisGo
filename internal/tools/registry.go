@@ -68,6 +68,10 @@ func Builtin(opts Options) ([]Tool, error) {
 	if err != nil {
 		return nil, err
 	}
+	analyzeLog, err := NewAnalyzeLog(opts.Workspace)
+	if err != nil {
+		return nil, err
+	}
 	return []Tool{readCSV, csvStats, readDoc, sysCmd, sqlQuery,
-		makeDir, listDir, download, jobStatus}, nil
+		makeDir, listDir, download, jobStatus, analyzeLog}, nil
 }

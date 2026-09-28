@@ -228,3 +228,21 @@ Route normalization collapses volatile ids so per-endpoint stats group.
 RE2 constraints honored (no lookahead/backref — manual post-vetting).
 
 Gates: vet, 24/24 pkgs, coverage 90.0%, check.
+
+
+## [2026-09-28] analyze_log tool + full wiring (merge #48)
+
+Owner directive: "bikin kita command saja lewat telegram dia bisa wiring
+semua itu ke code kita tanpa perlu kita suruh — seperti Hermes, cuma udah
+ada tools bawaan".
+
+- NEW TOOL analyze_log (10th builtin): kinds perf|exceptions|access|
+  behaviour; dual-entry (Execute + FuncTool); paths go through the SAME
+  resolvePath containment as read_csv/read_doc (Hard Rule 2 — closes the
+  gap where the Telegram gates read files directly).
+- Seeded router rules: /api_perf /exceptions /access /behaviour (+ -n N
+  variants) — instant, zero LLM, from Telegram AND HTTP AND CLI.
+- Telegram gates delegate to the tool via registry Execute: one code
+  path, one security boundary.
+- /addrule allowlist += analyze_log: new commands wireable from chat.
+Gates: vet, 24/24 pkgs, coverage 90.0%, check.

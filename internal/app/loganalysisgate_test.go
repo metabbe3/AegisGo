@@ -2,12 +2,14 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"aegisgo/internal/loganalysis"
 	"aegisgo/internal/store"
 )
 
@@ -141,5 +143,81 @@ func TestBehaviourCommand(t *testing.T) {
 func TestPerfEmojiBands(t *testing.T) {
 	if perfEmoji(0.5, 500) != "🟢" || perfEmoji(2, 500) != "🟡" || perfEmoji(0.5, 1500) != "🟡" || perfEmoji(6, 500) != "🔴" || perfEmoji(0.5, 4000) != "🔴" {
 		t.Fatal("perfEmoji bands wrong")
+	}
+}
+
+func TestAnalyzeViaToolDelegation(t *testing.T) {
+	// ExecTool wired → commands delegate to the analyze_log tool
+	// (containment lives there).
+	g := &LogAnalysisGate{
+		ExecTool: func(ctx context.Context, name string, args map[string]any) (any, error) {
+			if name != "analyze_log" {
+				t.Fatalf("tool = %s", name)
+			}
+			if args["kind"] != "perf" || args["path"] != "/x.log" {
+				t.Fatalf("args = %v", args)
+			}
+			return map[string]any{"kind": "perf", "path": "/x.log", "lines_read": 2,
+				"summary": "2 requests, p50 10ms"}, nil
+		},
+	}
+	out := g.HandleText(context.Background(), "/api_perf /x.log -n 100")
+	if !strings.Contains(out, "2 requests") || !strings.Contains(out, "p50 10ms") {
+		t.Fatalf("delegated = %q", out)
+	}
+	// tool error → warning surfaced, command short-circuits
+	g2 := &LogAnalysisGate{
+		ExecTool: func(ctx context.Context, name string, args map[string]any) (any, error) {
+			return nil, fmt.Errorf("path %q escapes the workspace", args["path"])
+		},
+	}
+	out2 := g2.HandleText(context.Background(), "/api_perf ../etc/passwd")
+	if !strings.Contains(out2, "⚠️") || !strings.Contains(out2, "escapes") {
+		t.Fatalf("escape = %q", out2)
+	}
+}
+
+func TestSummarizeToolOutputShapes(t *testing.T) {
+	if s := summarizeToolOutput(map[string]any{"summary": "abc"}); s != "abc" {
+		t.Fatalf("map = %q", s)
+	}
+	// struct without map: json round-trip path
+	type flat struct {
+		Kind    string `json:"kind"`
+		Summary string `json:"summary"`
+	}
+	if s := summarizeToolOutput(flat{Kind: "perf", Summary: "xyz"}); s != "xyz" {
+		t.Fatalf("struct = %q", s)
+	}
+}
+
+func TestPathAndNBoundaries(t *testing.T) {
+	// defaults, -n valid, -n out of range, missing path, junk tokens
+	if p, n, err := pathAndN("x.log", 500); err != nil || p != "x.log" || n != 500 {
+		t.Fatalf("plain: %v %v %v", p, n, err)
+	}
+	if p, n, err := pathAndN("x.log -n 7", 500); err != nil || p != "x.log" || n != 7 {
+		t.Fatalf("-n: %v %v %v", p, n, err)
+	}
+	if _, _, err := pathAndN("x.log -n 0", 500); err == nil {
+		t.Fatal("n=0 accepted")
+	}
+	if _, _, err := pathAndN("x.log -n 99999", 500); err == nil {
+		t.Fatal("n>20000 accepted")
+	}
+	if _, _, err := pathAndN("-n 5", 500); err == nil {
+		t.Fatal("missing path accepted")
+	}
+	if p, _, err := pathAndN("a.log b.log -n 5", 500); err != nil || p != "a.log" {
+		t.Fatalf("extra token: %v %v", p, err)
+	}
+}
+
+func TestKvBlockEmpty(t *testing.T) {
+	if kvBlock("X", nil) != "" {
+		t.Fatal("empty kvBlock")
+	}
+	if s := kvBlock("X", []loganalysis.KV{{Key: "k", Count: 2}}); !strings.Contains(s, "2×") || !strings.Contains(s, "*X*") {
+		t.Fatalf("kvBlock=%q", s)
 	}
 }

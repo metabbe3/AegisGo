@@ -47,5 +47,24 @@ func Seeded() []RuleDef {
 			ArgsTemplate: `{"path":"."}`, Origin: "seed"},
 		{Name: "job_status", Pattern: `/jobs?\s+([A-Za-z0-9_-]+)`, Tool: "job_status",
 			ArgsTemplate: `{"job_id":"$1"}`, Origin: "seed"},
+		// Log analysis family (merge #48): same analyze_log tool the
+		// Telegram commands use — deterministic, workspace-contained.
+		// Specific forms (-n N) precede the general ones.
+		{Name: "api_perf_n", Pattern: `/api_perf\s+(\S+)\s+-n\s+(\d+)`, Tool: "analyze_log",
+			ArgsTemplate: `{"path":"$1","kind":"perf","max_lines":$2}`, Origin: "seed"},
+		{Name: "api_perf", Pattern: `/api_perf\s+(\S+)`, Tool: "analyze_log",
+			ArgsTemplate: `{"path":"$1","kind":"perf"}`, Origin: "seed"},
+		{Name: "exceptions_n", Pattern: `/exceptions\s+(\S+)\s+-n\s+(\d+)`, Tool: "analyze_log",
+			ArgsTemplate: `{"path":"$1","kind":"exceptions","max_lines":$2}`, Origin: "seed"},
+		{Name: "exceptions", Pattern: `/exceptions\s+(\S+)`, Tool: "analyze_log",
+			ArgsTemplate: `{"path":"$1","kind":"exceptions"}`, Origin: "seed"},
+		{Name: "access_n", Pattern: `/access\s+(\S+)\s+-n\s+(\d+)`, Tool: "analyze_log",
+			ArgsTemplate: `{"path":"$1","kind":"access","max_lines":$2}`, Origin: "seed"},
+		{Name: "access", Pattern: `/access\s+(\S+)`, Tool: "analyze_log",
+			ArgsTemplate: `{"path":"$1","kind":"access"}`, Origin: "seed"},
+		{Name: "behaviour_n", Pattern: `/behaviour\s+(\S+)\s+-n\s+(\d+)`, Tool: "analyze_log",
+			ArgsTemplate: `{"path":"$1","kind":"behaviour","max_lines":$2}`, Origin: "seed"},
+		{Name: "behaviour", Pattern: `/behaviour\s+(\S+)`, Tool: "analyze_log",
+			ArgsTemplate: `{"path":"$1","kind":"behaviour"}`, Origin: "seed"},
 	}
 }

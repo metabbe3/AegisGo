@@ -245,6 +245,16 @@ see WORKFLOW.md.
 
 Watches run as one goroutine each (`internal/logwatch`), survive restarts (SQLite `log_watches`, schema v7), detect log rotation, and de-dupe alerts with a per-watch cooldown. Alerts land in the owner chat.
 
+**🧩 Wiring your own command (no rebuild)**
+
+Point a new command at any allowlisted tool (`read_csv`, `csv_stats`, `read_doc`, `analyze_log`) from Telegram:
+
+```
+/addrule name=myperf | pattern=/myperf\s+(?<p>\S+) | tool=analyze_log | args={"path":"$p","kind":"perf"}
+```
+
+The router serves it instantly everywhere (Telegram/HTTP/CLI) — the /api_perf family below is just this pattern, seeded.
+
 **📊 Log analysis** *(new — merge #47)* — deterministic, no LLM:
 - `/api_perf <path> [-n 500]` — HTTP latency p50/p95, slowest endpoints, 5xx %, status mix (routes auto-normalized: `/v1/answers/abc123` → `/v1/answers/:id`)
 - `/exceptions <path> [-n 500]` — error/exception/panic lines grouped into templates (`db timeout after DUR` ×42)

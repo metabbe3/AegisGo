@@ -178,3 +178,13 @@ func TestAnalyzeAccessFallbackStatus(t *testing.T) {
 		t.Fatalf("status=%v", r.TopStatus)
 	}
 }
+
+func TestFnumCoversAllTypes(t *testing.T) {
+	// every branch: nil, string, int64, int, float64
+	if fnum(nil) != -1 || fnum("nope") != -1 {
+		t.Fatal("invalid branches")
+	}
+	if fnum(int64(5)) != 5 || fnum(int(7)) != 7 || fnum(9.5) != 9.5 {
+		t.Fatal("numeric branches")
+	}
+}
