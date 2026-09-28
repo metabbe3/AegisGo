@@ -130,3 +130,11 @@ transport HTTP penuh. Queue malam ini:
 - Merged #41-#43 sudah changelog lengkap; PUSH origin main selesai (utang clear).
 - Utang tersisa: E2E happy-path lokal (AEGIS_DOWNLOAD_ALLOW_PRIVATE=on + slow local server) — belum dijalankan; Builder 21:30 jalan normal.
 - AEGIS_LLM=on (z.ai glm via API_KEY 49-char) tetap hidup; AUTH_TOKEN jangan dipakai (401).
+
+## 2026-09-28 pagi — merge #44 confidence engine (owner-direct)
+- feat/confidence-engine → main a24cf44; tests 21/21 ok, cover 90.2%, make check clean.
+- Setiap run bawa Confidence{Score,Band,Why}: router=100, classifier=90, llm=55+signals, refusal/error=0. Band ladder HIGH≥80/MEDIUM≥60/LOW.
+- Surface: Header() non-HIGH ("LOW conf=55"), REST runResponse +confidence/+confidence_band, SSE final event, audit v6 (confidence INTEGER DEFAULT 0; migration tunggal via ALTER — V1 schema sengaja TANPA kolom supaya satu jalur), slog "confidence=".
+- PENTING utk fitur lanjutan: ScoreLLM butuh (answer, distinctToolCount(ToolNames(resp)), len(router.RuleDefs())) — kalau nambah decision source baru, WAJIB set Confidence di finisher-nya + test band.
+- Telegram header otomatis dapat band (pakai res.Header(" · ")).
+- Utang lama: E2E happy-path lokal masih owed.
