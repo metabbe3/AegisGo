@@ -38,6 +38,7 @@ type AuditEvent struct {
 	TokensOut      int
 	LatencyMS      int64
 	Outcome        string // "ok" | "error"
+	Confidence     int    // decision-engine score 0-100 (confidence.go); 0 rows predate the feature
 }
 
 // Audit is the dual-sink entry point: one slog line (ops console/systemd
@@ -57,10 +58,11 @@ func (s *Store) Audit(ctx context.Context, ev AuditEvent) {
 		"model", ev.Model,
 		"latency_ms", ev.LatencyMS,
 		"outcome", ev.Outcome,
+		"confidence", ev.Confidence,
 	)
 	s.exec(`INSERT INTO audit_events
-		(ts, trace_id, interface, decision_source, rule_id, prompt_sha256, model, tokens_in, tokens_out, latency_ms, outcome)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+		(ts, trace_id, interface, decision_source, rule_id, prompt_sha256, model, tokens_in, tokens_out, latency_ms, outcome, confidence)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
 		now.Format(time.RFC3339Nano),
 		ev.TraceID,
 		ev.Interface,
@@ -72,6 +74,7 @@ func (s *Store) Audit(ctx context.Context, ev AuditEvent) {
 		ev.TokensOut,
 		ev.LatencyMS,
 		ev.Outcome,
+		ev.Confidence,
 	)
 }
 

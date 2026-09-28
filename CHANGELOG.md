@@ -132,3 +132,30 @@ adapts it to agent-org merges (every entry = one feature branch merged).
   (agent-org takes over development), `docs/agent-org/handoff.md`
   (session continuity). CHANGELOG.md itself seeded on the same branch.
   (why: docs = source of truth, blueprint J; owner mandate 22 Sep)
+
+## [2026-09-28] Decision Engine — confidence level per run (merge #44)
+
+Owner directive 28 Sep: "make decision engine also like confidence level".
+Every run now carries a deterministic confidence score (NOT an LLM judge —
+per Evolution research 28 Sep, deterministic verification beats judge
+models), mirroring the Hermes verifier ladder: HIGH ≥80 ship as-is,
+MEDIUM 60-79 ship with note, LOW <60 verify before trusting.
+
+Scoring by decision_source:
+- regex_router 100 (deterministic rule + native tool)
+- llm_classifier 90 (model-picked, deterministic tool output)
+- llm 55 base + verifiable signals: +12 two-plus distinct tool calls
+  (grounded), +6 one call, +10 cites a router rule, +8 router coverage
+  exists for the family, +4 structured answer. Capped 100.
+- llm_disabled / error 0 (refusal/failure, not an answer)
+
+Surfaces:
+- Result.Confidence — Header() shows "LOW conf=55" only for non-HIGH
+  (HIGH stays bare; unscored zero-value stays bare — pinned by tests)
+- REST /v1/agent/run JSON: confidence + confidence_band fields; SSE final
+  event carries both
+- audit_events.confidence column (migration v6; legacy rows = 0)
+- slog request line includes confidence
+
+Tests: confidence_test.go bands/caps/distinct-tools/header-contract;
+existing header tests extended. Coverage 90.2% ≥ gate. make check clean.

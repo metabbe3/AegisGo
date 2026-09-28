@@ -44,17 +44,26 @@ type Result struct {
 	RuleID         string
 	TraceID        string
 	LatencyMS      int64
+	Confidence     Confidence
 }
 
 // Header renders the one-line decision header every human interface shows
 // before the answer: "[source via rule<sep>123ms]", or "[source<sep>123ms]"
 // when no rule fired. sep joins the fields — ", " for terminals, " · " for
-// Telegram — so the cost behavior stays visible on both.
+// Telegram — so the cost behavior stays visible on both. The confidence
+// score rides along (decision-engine directive 28 Sep): HIGH answers ship
+// bare, MEDIUM/LOW carry their band so the reader knows to verify.
 func (r Result) Header(sep string) string {
+	base := fmt.Sprintf("[%s%s%dms]", r.DecisionSource, sep, r.LatencyMS)
 	if r.RuleID != "" {
-		return fmt.Sprintf("[%s via %s%s%dms]", r.DecisionSource, r.RuleID, sep, r.LatencyMS)
+		base = fmt.Sprintf("[%s via %s%s%dms]", r.DecisionSource, r.RuleID, sep, r.LatencyMS)
 	}
-	return fmt.Sprintf("[%s%s%dms]", r.DecisionSource, sep, r.LatencyMS)
+	// Zero-value Confidence (unscored Result, e.g. constructed by callers)
+	// renders bare — the header contract tests pin this.
+	if r.Confidence.Band == "" || r.Confidence.Band == "HIGH" {
+		return base
+	}
+	return fmt.Sprintf("%s %s conf=%d", base, r.Confidence.Band, r.Confidence.Score)
 }
 
 // PromoteAfter is the consecutive-agreement streak that promotes a shadow
@@ -156,12 +165,14 @@ func (e *Engine) runUnwrapped(ctx context.Context, prompt string) Result {
 	if err != nil {
 		return e.finishLLMError(ctx, err, traceID, prompt, start)
 	}
+	conf := ScoreLLM(resp.String(), distinctToolCount(ToolNames(resp)), ruleCountSafe(e.Router))
 	e.audit(ctx, store.AuditEvent{
 		TraceID: traceID, DecisionSource: store.SourceLLM,
 		Prompt: prompt, Model: e.Model, LatencyMS: latency,
+		Confidence: conf.Score,
 	})
 	e.recordFallback(traceID, prompt, resp)
-	return Result{Answer: resp.String(), DecisionSource: store.SourceLLM, TraceID: traceID, LatencyMS: latency}
+	return Result{Answer: resp.String(), DecisionSource: store.SourceLLM, TraceID: traceID, LatencyMS: latency, Confidence: conf}
 }
 
 // streamChunkLen is the slice size for deterministic answers streamed
@@ -259,12 +270,14 @@ func (e *Engine) RunStreaming(ctx context.Context, prompt string, emit func(chun
 	toolNames := slices.Sorted(maps.Keys(tools))
 	e.recordFallbackParts(traceID, prompt, strings.Join(toolNames, ","), e.Model,
 		int(usage.InputTokenCount), int(usage.OutputTokenCount))
+	conf := ScoreLLM(acc.String(), len(tools), ruleCountSafe(e.Router))
 	e.audit(ctx, store.AuditEvent{
 		TraceID: traceID, DecisionSource: store.SourceLLM,
 		Prompt: prompt, Model: e.Model, LatencyMS: latency,
+		Confidence: conf.Score,
 	})
 	return Result{Answer: acc.String(), DecisionSource: store.SourceLLM,
-		TraceID: traceID, LatencyMS: latency}
+		TraceID: traceID, LatencyMS: latency, Confidence: conf}
 }
 
 // tryClassifier consults the fast tier on a router miss (AEGIS_CLASSIFIER=
@@ -324,17 +337,21 @@ func (e *Engine) finishRouter(ctx context.Context, d router.Decision, prompt, tr
 		// The rule matched; a tool failing underneath it is still a router
 		// decision (Hard Rule 6), so Result reports the source like the audit row.
 		res.DecisionSource = store.SourceRouter
+		res.Confidence = ScoreNone("tool failed under rule")
 		e.audit(ctx, store.AuditEvent{
 			TraceID: traceID, DecisionSource: store.SourceRouter, RuleID: d.RuleID,
 			Prompt: prompt, LatencyMS: res.LatencyMS, Outcome: "error",
+			Confidence: res.Confidence.Score,
 		})
 		return res
 	}
 	res.Answer = d.Text()
 	res.DecisionSource = store.SourceRouter
+	res.Confidence = ScoreRouter()
 	e.audit(ctx, store.AuditEvent{
 		TraceID: traceID, DecisionSource: store.SourceRouter, RuleID: d.RuleID,
 		Prompt: prompt, LatencyMS: res.LatencyMS,
+		Confidence: res.Confidence.Score,
 	})
 	return res
 }
@@ -364,11 +381,13 @@ func (e *Engine) recordFallbackParts(traceID, prompt, toolsUsed, model string, t
 // finishLLMOff is the kill-switch miss: no rule matched and there is no
 // provider to ask. The run still audits (decision_source=llm_disabled).
 func (e *Engine) finishLLMOff(ctx context.Context, traceID, prompt string, start time.Time) Result {
+	conf := ScoreNone("refusal, not an answer")
 	e.audit(ctx, store.AuditEvent{
 		TraceID: traceID, DecisionSource: store.SourceLLMOff,
 		Prompt: prompt, LatencyMS: ms(time.Since(start)),
+		Confidence: conf.Score,
 	})
-	return Result{Answer: llmOffAnswer, DecisionSource: store.SourceLLMOff, TraceID: traceID}
+	return Result{Answer: llmOffAnswer, DecisionSource: store.SourceLLMOff, TraceID: traceID, Confidence: conf}
 }
 
 // finishClassifier records a fast-tier hit. Classifier hits are
@@ -378,27 +397,32 @@ func (e *Engine) finishLLMOff(ctx context.Context, traceID, prompt string, start
 func (e *Engine) finishClassifier(ctx context.Context, answer, tool, traceID, prompt string, start time.Time) Result {
 	latency := ms(time.Since(start))
 	e.recordFallbackParts(traceID, prompt, tool, e.ClassifierModel, 0, 0)
+	conf := ScoreClassifier()
 	e.audit(ctx, store.AuditEvent{
 		TraceID: traceID, DecisionSource: store.SourceLLMClassifier,
 		Prompt: prompt, Model: e.ClassifierModel, LatencyMS: latency,
+		Confidence: conf.Score,
 	})
 	return Result{Answer: answer, DecisionSource: store.SourceLLMClassifier,
-		TraceID: traceID, LatencyMS: latency}
+		TraceID: traceID, LatencyMS: latency, Confidence: conf}
 }
 
 // finishLLMError is the fallback's failure tail: a Result that still
 // reports decision_source=error (Hard Rule 6) plus its audit row.
 func (e *Engine) finishLLMError(ctx context.Context, err error, traceID, prompt string, start time.Time) Result {
 	latency := ms(time.Since(start))
+	conf := ScoreNone("provider failure")
 	e.audit(ctx, store.AuditEvent{
 		TraceID: traceID, DecisionSource: store.SourceError,
 		Prompt: prompt, Model: e.Model, LatencyMS: latency, Outcome: "error",
+		Confidence: conf.Score,
 	})
 	return Result{
 		Answer:         fmt.Sprintf("LLM run failed: %s", err),
 		DecisionSource: store.SourceError,
 		TraceID:        traceID,
 		LatencyMS:      latency,
+		Confidence:     conf,
 	}
 }
 
@@ -416,11 +440,13 @@ func (e *Engine) finishShadow(ctx context.Context, d router.Decision, prompt, tr
 		return e.finishRouter(ctx, d, prompt, traceID, start)
 	}
 	latency := ms(time.Since(start))
+	conf := ScoreLLM(resp.String(), distinctToolCount(ToolNames(resp)), ruleCountSafe(e.Router))
 	res := Result{Answer: resp.String(), DecisionSource: store.SourceLLM,
-		RuleID: d.RuleID, TraceID: traceID, LatencyMS: latency}
+		RuleID: d.RuleID, TraceID: traceID, LatencyMS: latency, Confidence: conf}
 	e.audit(ctx, store.AuditEvent{
 		TraceID: traceID, DecisionSource: store.SourceLLM, RuleID: d.RuleID,
 		Prompt: prompt, Model: e.Model, LatencyMS: latency,
+		Confidence: conf.Score,
 	})
 	e.recordFallback(traceID, prompt, resp)
 	return res
