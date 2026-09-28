@@ -138,3 +138,10 @@ transport HTTP penuh. Queue malam ini:
 - PENTING utk fitur lanjutan: ScoreLLM butuh (answer, distinctToolCount(ToolNames(resp)), len(router.RuleDefs())) — kalau nambah decision source baru, WAJIB set Confidence di finisher-nya + test band.
 - Telegram header otomatis dapat band (pakai res.Header(" · ")).
 - Utang lama: E2E happy-path lokal masih owed.
+
+## 2026-09-28 siang — merge #45 API envelope + /addrule (owner-direct, lanjutan session)
+- feat/api-envelope-addrule → main 97ee391; vet clean, 22/22 ok, cover 90.0%, check clean.
+- ENVELOPE: semua /v1 = {success,code,message?,reason?,data?}; probes plain; engine-500 → reason=provider dgn teks engine sbg message. Test lama di-migrasi ke decodeInto / inline unwrap.
+- /ADDRULE: gated L2 (ADR-0007); parse strict PRE-approval; allowlist read_csv/csv_stats/read_doc; INSERT origin=manual + Swap; row persist jika Swap gagal (retry via /reload_rules).
+- Coverage sempat 89.6% → jsonField dead-code dihapus + test HandleText branches → 90.0%.
+- Deploy binary ke live bot = malam ini Builder 21:30 (protokol deploy-sekali-akhir-slot).
