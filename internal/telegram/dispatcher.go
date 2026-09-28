@@ -302,7 +302,7 @@ func (d *Dispatcher) helpText() string {
 		"Schedule any command: /every 30m /disk · /scheduled · /unschedule #1\n" +
 		"/csv_summary <path> · /csv_head <path> [rows]\n" +
 		"/rules lists every active rule.\n" +
-		"HITL: /approvals lists pending · /approve <id> · /deny <id> (bare /approve decides the oldest).\n/status (alias /stats) — one-glance health: runs, deflection, latency, rules.\n/reload_rules — L2 action: hot-reload router rules after approval (✅/🚫 buttons).\n" +
+		"HITL: /approvals lists pending · /approve <id> · /deny <id> (bare /approve decides the oldest).\n/status (alias /stats) — one-glance health: runs, deflection, latency, rules.\n/reload_rules — L2 action: hot-reload router rules after approval (✅/🚫 buttons).\n/addrule name=X | pattern=/x | tool=read_doc | args={\"path\":\"docs/$1\"} — add a command from chat (L2 gated; tools: read_csv, csv_stats, read_doc).\n" +
 		"/jobs — background download jobs: id, state, age.\n" +
 		"/cancel_job <id> — stop a running download (id from /jobs).\n" +
 		"Anything else goes to the LLM (if enabled)."

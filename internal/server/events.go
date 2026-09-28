@@ -69,12 +69,12 @@ func (p *EventPub) Subscribe(ctx context.Context) <-chan RunEvent {
 // comment heartbeat to survive proxies that close idle connections.
 func eventsHandler(w http.ResponseWriter, r *http.Request, d Deps) {
 	if d.Events == nil {
-		writeError(w, http.StatusServiceUnavailable, "events not wired")
+		writeErr(w, http.StatusServiceUnavailable, "events not wired")
 		return
 	}
 	fl, ok := w.(http.Flusher)
 	if !ok {
-		writeError(w, http.StatusInternalServerError, "streaming unsupported")
+		writeErr(w, http.StatusInternalServerError, "streaming unsupported")
 		return
 	}
 	w.Header().Set("Content-Type", "text/event-stream")

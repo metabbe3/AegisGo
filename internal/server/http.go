@@ -155,7 +155,7 @@ func Handler(d Deps) http.Handler {
 			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 			defer cancel()
 			if err := d.Readiness.Ping(ctx); err != nil {
-				writeError(w, http.StatusServiceUnavailable, "store unreachable: "+err.Error())
+				writeErr(w, http.StatusServiceUnavailable, "store unreachable: "+err.Error())
 				return
 			}
 		}
@@ -180,14 +180,14 @@ func Handler(d Deps) http.Handler {
 
 	v1.HandleFunc("GET /v1/jobs", func(w http.ResponseWriter, r *http.Request) {
 		if d.Jobs == nil {
-			writeError(w, http.StatusServiceUnavailable, "jobs not wired")
+			writeErr(w, http.StatusServiceUnavailable, "jobs not wired")
 			return
 		}
 		jobs := d.Jobs.ListJobs()
 		if jobs == nil {
 			jobs = []Job{} // JSON: [] not null
 		}
-		writeJSON(w, http.StatusOK, jobs)
+		writeOK(w, http.StatusOK, jobs)
 	})
 
 	// POST /v1/jobs/{id}/cancel — abort a running background job. The
@@ -196,16 +196,16 @@ func Handler(d Deps) http.Handler {
 	// honest wire shape for a fire-then-converge operation.
 	v1.HandleFunc("POST /v1/jobs/{id}/cancel", func(w http.ResponseWriter, r *http.Request) {
 		if d.Jobs == nil {
-			writeError(w, http.StatusServiceUnavailable, "jobs not wired")
+			writeErr(w, http.StatusServiceUnavailable, "jobs not wired")
 			return
 		}
 		id := r.PathValue("id")
 		j, known, issued := d.Jobs.CancelJob(id)
 		if !known {
-			writeError(w, http.StatusNotFound, "unknown job "+id)
+			writeErr(w, http.StatusNotFound, "unknown job "+id)
 			return
 		}
-		writeJSON(w, http.StatusOK, cancelJobResponse{Job: j, CancelIssued: issued})
+		writeOK(w, http.StatusOK, cancelJobResponse{Job: j, CancelIssued: issued})
 	})
 
 	v1.HandleFunc("GET /v1/answers/{trace}", func(w http.ResponseWriter, r *http.Request) {
@@ -214,7 +214,7 @@ func Handler(d Deps) http.Handler {
 
 	v1.HandleFunc("GET /v1/approvals", func(w http.ResponseWriter, r *http.Request) {
 		if d.Approvals == nil {
-			writeError(w, http.StatusServiceUnavailable, "approvals not wired")
+			writeErr(w, http.StatusServiceUnavailable, "approvals not wired")
 			return
 		}
 		listApprovals(w, r, d.Approvals)
@@ -222,7 +222,7 @@ func Handler(d Deps) http.Handler {
 
 	v1.HandleFunc("POST /v1/approvals/{id}/decision", func(w http.ResponseWriter, r *http.Request) {
 		if d.Approvals == nil {
-			writeError(w, http.StatusServiceUnavailable, "approvals not wired")
+			writeErr(w, http.StatusServiceUnavailable, "approvals not wired")
 			return
 		}
 		decideApproval(w, r, d.Approvals)
@@ -269,11 +269,11 @@ type runResponse struct {
 func decodeRunRequest(w http.ResponseWriter, r *http.Request) (runRequest, bool) {
 	var req runRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		writeErr(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return req, false
 	}
 	if strings.TrimSpace(req.Prompt) == "" {
-		writeError(w, http.StatusBadRequest, "prompt is required")
+		writeErr(w, http.StatusBadRequest, "prompt is required")
 		return req, false
 	}
 	return req, true
@@ -290,7 +290,7 @@ func runAgent(w http.ResponseWriter, r *http.Request, d Deps) {
 	if r.URL.Query().Get("async") == "1" {
 		traceID := trace.From(r.Context())
 		if err := d.Answers.PutAnswer(r.Context(), traceID); err != nil {
-			writeError(w, http.StatusInternalServerError, "queueing answer: "+err.Error())
+			writeErr(w, http.StatusInternalServerError, "queueing answer: "+err.Error())
 			return
 		}
 		// Same 5-minute bound as the sync path: a stuck provider call must
@@ -303,7 +303,7 @@ func runAgent(w http.ResponseWriter, r *http.Request, d Deps) {
 				d.Logger.Error("completing answer", "trace_id", traceID, "error", err)
 			}
 		}) // detached: outlives the request, keeps trace values
-		writeJSON(w, http.StatusAccepted, map[string]string{"trace_id": traceID, "status": store.AnswerPending})
+		writeOK(w, http.StatusAccepted, map[string]string{"trace_id": traceID, "status": store.AnswerPending})
 		return
 	}
 
@@ -315,9 +315,13 @@ func runAgent(w http.ResponseWriter, r *http.Request, d Deps) {
 	res := d.Engine.Run(ctx, req.Prompt)
 	code := http.StatusOK
 	if res.DecisionSource == store.SourceError {
-		code = http.StatusInternalServerError
+		// The engine's answer text IS the failure message ("LLM run
+		// failed: ..."); envelope it rather than burying it in data.
+		writeJSON(w, http.StatusInternalServerError,
+			errEnvelope(http.StatusInternalServerError, res.Answer, ReasonProvider))
+		return
 	}
-	writeJSON(w, code, runResponse{
+	writeOK(w, code, runResponse{
 		Output:         res.Answer,
 		DecisionSource: res.DecisionSource,
 		TraceID:        res.TraceID,
@@ -338,7 +342,7 @@ func runAgentStream(w http.ResponseWriter, r *http.Request, d Deps) {
 	}
 	fl, ok := w.(http.Flusher)
 	if !ok {
-		writeError(w, http.StatusInternalServerError, "streaming unsupported")
+		writeErr(w, http.StatusInternalServerError, "streaming unsupported")
 		return
 	}
 
@@ -381,34 +385,34 @@ func sseWrite(w http.ResponseWriter, fl http.Flusher, event string, payload any)
 // statsHandler is GET /v1/stats — the observability surface.
 func statsHandler(w http.ResponseWriter, r *http.Request, d Deps) {
 	if d.Stats == nil {
-		writeError(w, http.StatusNotImplemented, "stats unavailable")
+		writeErr(w, http.StatusNotImplemented, "stats unavailable")
 		return
 	}
 	s, err := d.Stats.Stats(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, s)
+	writeOK(w, http.StatusOK, s)
 }
 
 // getAnswer polls an async run: pending | done | error | 404.
 func getAnswer(w http.ResponseWriter, r *http.Request, d Deps) {
 	traceID := r.PathValue("trace")
 	if traceID == "" {
-		writeError(w, http.StatusBadRequest, "trace is required")
+		writeErr(w, http.StatusBadRequest, "trace is required")
 		return
 	}
 	a, ok, err := d.Answers.GetAnswer(r.Context(), traceID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if !ok {
-		writeError(w, http.StatusNotFound, "no answer for trace "+traceID)
+		writeErr(w, http.StatusNotFound, "no answer for trace "+traceID)
 		return
 	}
-	writeJSON(w, http.StatusOK, a)
+	writeOK(w, http.StatusOK, a)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -418,8 +422,4 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 		// Nothing more we can do; the status code is already sent.
 		_ = err
 	}
-}
-
-func writeError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
 }

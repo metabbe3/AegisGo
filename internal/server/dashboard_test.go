@@ -117,7 +117,8 @@ func TestJobsEndpoint(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("wired /v1/jobs = %d", rr.Code)
 	}
-	if !strings.Contains(rr.Body.String(), `"kind"`) && strings.TrimSpace(rr.Body.String()) != "[]" {
-		t.Fatalf("body = %q", rr.Body.String())
+	got := rr.Body.String()
+	if !strings.Contains(got, `"kind"`) && !strings.Contains(got, `"data":[]`) {
+		t.Fatalf("body = %q", got)
 	}
 }

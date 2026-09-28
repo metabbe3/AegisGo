@@ -309,6 +309,11 @@ func startTelegram(ctx context.Context, cfg config.Config, eng *engine.Engine,
 	rg := &ReloadDiffGate{ReloadGate: &ReloadGate{Store: st, Router: rt}}
 	dispatcher.RegisterGated(map[string]telegram.GatedAction{"/reload_rules": gatedText{rg}})
 
+	// /addrule (owner directive 28 Sep): add a router rule from chat,
+	// gated L2 — the approval reason shows the exact rule being added.
+	ag := &AddRuleGate{Store: st, Router: rt}
+	dispatcher.RegisterGated(map[string]telegram.GatedAction{"/addrule": addRuleText{g: ag}})
+
 	// /status + /history share the store REST already serves.
 	dispatcher.SetStats(st)
 	dispatcher.SetHistory(st)

@@ -159,3 +159,28 @@ Surfaces:
 
 Tests: confidence_test.go bands/caps/distinct-tools/header-contract;
 existing header tests extended. Coverage 90.2% ≥ gate. make check clean.
+
+## [2026-09-28] API envelope + /addrule from Telegram (merge #45)
+
+Owner directive 28 Sep: "make the json response like API response with
+error code and reason" + "add rules/command from telegram".
+
+1) Standard envelope on every /v1 endpoint (envelope.go):
+   {success, code, message?, reason?, data?}. code = stable token
+   (OK/BAD_REQUEST/UNAUTHORIZED/NOT_FOUND/INTERNAL...), reason =
+   failure category (auth/request/not_found/state/provider/internal).
+   Engine errors classify as provider with the failure text as message.
+   /healthz & /readyz stay plain (orchestrator probes). All handler
+   tests updated to unwrap the envelope (decodeInto helper).
+
+2) /addrule gated L2 action (addrulegate.go, ADR-0007 pattern):
+   /addrule name=X | pattern=/x(?:\s+(?<arg>.*))? | tool=read_doc |
+   args={"path":"docs/$arg"} — strict parse BEFORE any approval row
+   (name charset, pattern must be slash-anchored anti-catch-all, regex
+   must compile, args must be JSON); tool allowlist read_csv/csv_stats/
+   read_doc (Hard Rule 12 symmetry — chat cannot widen the command
+   surface); approve → INSERT origin=manual + router hot-swap; deny/
+   timeout → nothing changes. Help text updated.
+
+Gates: vet clean, 22/22 pkgs ok, coverage 90.0% (gate 90), make check
+clean. jsonField helper removed (dead code caught by the gate itself).
