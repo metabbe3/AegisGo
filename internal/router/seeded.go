@@ -66,5 +66,13 @@ func Seeded() []RuleDef {
 			ArgsTemplate: `{"path":"$1","kind":"behaviour","max_lines":$2}`, Origin: "seed"},
 		{Name: "behaviour", Pattern: `/behaviour\s+(\S+)`, Tool: "analyze_log",
 			ArgsTemplate: `{"path":"$1","kind":"behaviour"}`, Origin: "seed"},
+		// Predictive ops (merge #49): deterministic trend forecast.
+		// Optional key=value forms precede the bare path form.
+		{Name: "forecast_full", Pattern: `/forecast\s+(\S+)\s+metric=(err_rate|req_rate|latency_p95)\s+threshold=(\d+)\s+window_min=(\d+)`, Tool: "ops_forecast",
+			ArgsTemplate: `{"path":"$1","metric":"$2","threshold":$3,"window_min":$4}`, Origin: "seed"},
+		{Name: "forecast_metric", Pattern: `/forecast\s+(\S+)\s+metric=(err_rate|req_rate|latency_p95)\s+threshold=(\d+)`, Tool: "ops_forecast",
+			ArgsTemplate: `{"path":"$1","metric":"$2","threshold":$3}`, Origin: "seed"},
+		{Name: "forecast", Pattern: `/forecast\s+(\S+)`, Tool: "ops_forecast",
+			ArgsTemplate: `{"path":"$1"}`, Origin: "seed"},
 	}
 }
