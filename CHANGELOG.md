@@ -210,3 +210,21 @@ rebuild", "analyze logs for patterns", "reformat responses markdown",
 5) README command reference + API envelope docs.
 
 Gates: vet clean, 23/23 pkgs, coverage 90.1%, make check clean.
+
+
+## [2026-09-28] Log analysis family (merge #47)
+
+Owner directive 28 Sep: "analyze api performance, application exception,
+access / audits logs, behaviours logs".
+
+internal/loganalysis — five deterministic analyses over any log file (and
+the agent's own audit_events for /audit): API perf (p50/p95/slowest/5xx),
+exceptions (template grouping), access (IPs/routes/status/agents), audit
+trail rollup (decision-source mix, conf avg, latency), behaviour (actions,
+peak hours, bursts, novel shapes). Zero LLM anywhere.
+
+Commands: /api_perf /exceptions /access /audit /behaviour (markdown).
+Route normalization collapses volatile ids so per-endpoint stats group.
+RE2 constraints honored (no lookahead/backref — manual post-vetting).
+
+Gates: vet, 24/24 pkgs, coverage 90.0%, check.

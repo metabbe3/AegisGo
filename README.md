@@ -245,6 +245,13 @@ see WORKFLOW.md.
 
 Watches run as one goroutine each (`internal/logwatch`), survive restarts (SQLite `log_watches`, schema v7), detect log rotation, and de-dupe alerts with a per-watch cooldown. Alerts land in the owner chat.
 
+**📊 Log analysis** *(new — merge #47)* — deterministic, no LLM:
+- `/api_perf <path> [-n 500]` — HTTP latency p50/p95, slowest endpoints, 5xx %, status mix (routes auto-normalized: `/v1/answers/abc123` → `/v1/answers/:id`)
+- `/exceptions <path> [-n 500]` — error/exception/panic lines grouped into templates (`db timeout after DUR` ×42)
+- `/access <path> [-n 500]` — traffic shape: top IPs, routes, status codes, user agents
+- `/audit [-n 200]` — the agent's own decision trail: decision-source mix, error %, confidence avg, latency percentiles
+- `/behaviour <path> [-n 1000]` — repeated actions, peak hours histogram, per-minute bursts, novel shapes
+
 **🛠 Admin (HITL-gated)**
 - `/status` · `/approvals` · `/approve <id>` · `/deny <id>`
 - `/reload_rules` (✅/🚫 gated) — hot-reload router rules

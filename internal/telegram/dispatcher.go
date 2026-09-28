@@ -37,8 +37,11 @@ type Dispatcher struct {
 	// rules renders the /rules listing.
 	rules func() []string
 	// watch handles the /watch family (24/7 log watchdog).
-	watch  func(ctx context.Context, text string) string
-	logger *slog.Logger
+	watch func(ctx context.Context, text string) string
+	// logAnalysis handles the deterministic analysis family
+	// (/api_perf /exceptions /access /audit /behaviour).
+	logAnalysis func(ctx context.Context, text string) string
+	logger      *slog.Logger
 	// approver backs the HITL commands; nil disables them.
 	approver approver
 	// gated maps "/name" → L2 action flows (nil = none wired).
@@ -160,6 +163,12 @@ func (d *Dispatcher) Process(ctx context.Context, row InboxRow) {
 	case "/unschedule":
 		d.claimAndSend(ctx, row, d.sched.Unregister(row.Text))
 		return
+	case "/api_perf", "/exceptions", "/access", "/audit", "/behaviour":
+		if d.logAnalysis == nil {
+			d.claimAndSend(ctx, row, "Log analysis not wired.")
+			return
+		}
+		d.claimAndSendMD(ctx, row, d.logAnalysis(ctx, row.Text))
 	case "/watch", "/unwatch", "/watchlist", "/analyze":
 		if d.watch == nil {
 			d.claimAndSend(ctx, row, "Watchdog not wired.")
@@ -344,6 +353,12 @@ func (d *Dispatcher) helpText() string {
 		"`/watch name=gw | path=/tmp/gw.log | pattern=panic|FATAL | every=30s`\n" +
 		"`/unwatch <name>` · `/watchlist`\n" +
 		"`/analyze /tmp/gw.log -n 500` — top pattern & error rate\n\n" +
+		"*📊 Log analysis* (deterministic, no LLM)\n" +
+		"`/api_perf <path>` — p50/p95, slow endpoints, 5xx%\n" +
+		"`/exceptions <path>` — error & panic templates\n" +
+		"`/access <path>` — IPs, routes, status codes\n" +
+		"`/audit` — own decision trail (conf, latency)\n" +
+		"`/behaviour <path>` — actions, peak hours, bursts\n\n" +
 		"*🛠 Admin (HITL)*\n" +
 		"`/status` — health ringkas\n" +
 		"`/approvals` · `/approve <id>` · `/deny <id>`\n" +
@@ -482,6 +497,11 @@ func (d *Dispatcher) statusText(ctx context.Context) string {
 
 // SetHistory wires the decisions source for /history.
 func (d *Dispatcher) SetHistory(h historian) { d.hist = h }
+
+// SetLogAnalysis wires the deterministic analysis command family.
+func (d *Dispatcher) SetLogAnalysis(f func(ctx context.Context, text string) string) {
+	d.logAnalysis = f
+}
 
 // SetWatch wires the /watch family (24/7 log watchdog, owner 28 Sep).
 func (d *Dispatcher) SetWatch(f func(ctx context.Context, text string) string) { d.watch = f }
