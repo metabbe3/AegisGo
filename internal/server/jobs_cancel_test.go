@@ -41,10 +41,13 @@ func TestJobsCancelEndpointIssued(t *testing.T) {
 	if st.capture != "j_1" {
 		t.Fatalf("store saw %q, want j_1", st.capture)
 	}
-	var body cancelJobResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+	var env struct {
+		Data cancelJobResponse `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
+	body := env.Data
 	if !body.CancelIssued || body.Status != tools.JobRunning {
 		t.Fatalf("body = %+v, want issued=true with running snapshot", body)
 	}
@@ -92,10 +95,13 @@ func TestJobsCancelEndpointAlreadyFinished(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
-	var body cancelJobResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+	var env struct {
+		Data cancelJobResponse `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
+	body := env.Data
 	if body.CancelIssued {
 		t.Fatal("cancel_issued must be false for an already-finished job")
 	}

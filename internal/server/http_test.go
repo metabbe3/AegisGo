@@ -23,6 +23,25 @@ import (
 	"aegisgo/internal/trace"
 )
 
+
+// decodeInto unwraps the standard envelope and decodes data into target.
+func decodeInto(t *testing.T, resp *http.Response, target any) {
+	t.Helper()
+	var env Envelope
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	if !env.Success {
+		t.Fatalf("envelope not success: %+v", env)
+	}
+	b, err := json.Marshal(env.Data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(b, target); err != nil {
+		t.Fatalf("decode data: %v", err)
+	}
+}
 // fakeEngine answers instantly and counts runs; prompts containing "/"
 // route deterministically (like a real router hit).
 type fakeEngine struct {
@@ -98,9 +117,7 @@ func TestTraceMiddlewareEchoesTrace(t *testing.T) {
 		t.Errorf("echoed trace = %q", got)
 	}
 	var body runResponse
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatal(err)
-	}
+	decodeInto(t, resp, &body)
 	if body.DecisionSource != store.SourceRouter || body.TraceID != "my-trace-42" {
 		t.Errorf("body = %+v", body)
 	}
@@ -144,9 +161,7 @@ func TestAsyncRunAndPoll(t *testing.T) {
 		TraceID string `json:"trace_id"`
 		Status  string `json:"status"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&ack); err != nil {
-		t.Fatal(err)
-	}
+	decodeInto(t, resp, &ack)
 	if ack.TraceID == "" || ack.Status != store.AnswerPending {
 		t.Fatalf("ack = %+v", ack)
 	}
@@ -158,7 +173,7 @@ func TestAsyncRunAndPoll(t *testing.T) {
 			t.Fatal(err)
 		}
 		var a store.Answer
-		_ = json.NewDecoder(ga.Body).Decode(&a)
+		decodeInto(t, ga, &a)
 		ga.Body.Close()
 		if a.Status == store.AnswerDone {
 			break
@@ -241,9 +256,7 @@ func TestStatsEndpoint(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	var s store.StatsSnapshot
-	if err := json.NewDecoder(resp.Body).Decode(&s); err != nil {
-		t.Fatal(err)
-	}
+	decodeInto(t, resp, &s)
 	if s.TotalRuns != 2 || s.DeflectionRate != 0.5 {
 		t.Errorf("stats = %+v", s)
 	}
@@ -422,15 +435,15 @@ func TestRunBadJSONBody(t *testing.T) {
 			t.Fatal(err)
 		}
 		var eb struct {
-			Error string `json:"error"`
+			Message string `json:"message"`
 		}
 		_ = json.NewDecoder(resp.Body).Decode(&eb)
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("%q body=%q status = %d, want 400", tc.query, tc.body, resp.StatusCode)
 		}
-		if !strings.Contains(eb.Error, tc.wantErr) {
-			t.Errorf("%q body=%q error = %q, want substring %q", tc.query, tc.body, eb.Error, tc.wantErr)
+		if !strings.Contains(eb.Message, tc.wantErr) {
+			t.Errorf("%q body=%q error = %q, want substring %q", tc.query, tc.body, eb.Message, tc.wantErr)
 		}
 	}
 }
@@ -455,9 +468,7 @@ func TestAsyncCompletionPoll(t *testing.T) {
 		TraceID string `json:"trace_id"`
 		Status  string `json:"status"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&ack); err != nil {
-		t.Fatal(err)
-	}
+	decodeInto(t, resp, &ack)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusAccepted || ack.TraceID == "" || ack.Status != store.AnswerPending {
 		t.Fatalf("ack: status=%d body=%+v", resp.StatusCode, ack)
@@ -474,7 +485,9 @@ func TestAsyncCompletionPoll(t *testing.T) {
 		if ga.StatusCode != http.StatusOK {
 			t.Fatalf("poll status = %d, want 200", ga.StatusCode)
 		}
-		_ = json.NewDecoder(ga.Body).Decode(&got)
+		_ = json.NewDecoder(ga.Body).Decode(&struct {
+			Data *store.Answer `json:"data"`
+		}{Data: &got})
 		return got.Status == store.AnswerDone
 	})
 	if got.Output != "slow answer" {
@@ -504,7 +517,11 @@ func TestAsyncErrorRunStatus(t *testing.T) {
 	var ack struct {
 		TraceID string `json:"trace_id"`
 	}
-	_ = json.NewDecoder(resp.Body).Decode(&ack)
+	_ = json.NewDecoder(resp.Body).Decode(&struct {
+		Data *struct {
+			TraceID string `json:"trace_id"`
+		} `json:"data"`
+	}{Data: &ack})
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202", resp.StatusCode)
@@ -519,7 +536,9 @@ func TestAsyncErrorRunStatus(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer ga.Body.Close()
-		_ = json.NewDecoder(ga.Body).Decode(&got)
+		_ = json.NewDecoder(ga.Body).Decode(&struct {
+			Data *store.Answer `json:"data"`
+		}{Data: &got})
 		return got.Status == store.AnswerError
 	})
 	if got.Output != "provider exploded" {
@@ -542,14 +561,14 @@ func TestAsyncPutAnswerError(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	var eb struct {
-		Error string `json:"error"`
+		Message string `json:"message"`
 	}
 	_ = json.NewDecoder(resp.Body).Decode(&eb)
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", resp.StatusCode)
 	}
-	if !strings.Contains(eb.Error, "queueing answer") {
-		t.Errorf("error = %q, want substring %q", eb.Error, "queueing answer")
+	if !strings.Contains(eb.Message, "queueing answer") {
+		t.Errorf("error = %q, want substring %q", eb.Message, "queueing answer")
 	}
 	// Enqueue failed before the goroutine spawned: no run may start.
 	if n := eng.runs.Load(); n != 0 {
@@ -669,15 +688,18 @@ func TestSyncErrorSourceIs500(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	var body runResponse
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	var env Envelope
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
 		t.Fatal(err)
 	}
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Errorf("status = %d, want 500", resp.StatusCode)
 	}
-	if body.DecisionSource != store.SourceError || body.Output != "provider down" {
-		t.Errorf("body = %+v", body)
+	if env.Success || env.Code != "INTERNAL" || env.Reason != "provider" {
+		t.Errorf("envelope = %+v", env)
+	}
+	if env.Message != "provider down" {
+		t.Errorf("message = %q, want engine failure text", env.Message)
 	}
 }
 
@@ -721,9 +743,7 @@ func TestRouterToolErrorKeepsSource(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	var body runResponse
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatal(err)
-	}
+	decodeInto(t, resp, &body)
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("status = %d, want 200 (router decision, not a 5xx)", resp.StatusCode)
 	}
@@ -756,13 +776,13 @@ func TestStatsError(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	var eb struct {
-		Error string `json:"error"`
+		Message string `json:"message"`
 	}
 	_ = json.NewDecoder(resp.Body).Decode(&eb)
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", resp.StatusCode)
 	}
-	if eb.Error == "" {
+	if eb.Message == "" {
 		t.Error("error body is empty, want the store failure")
 	}
 }
@@ -778,14 +798,14 @@ func TestStatsUnavailable(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	var eb struct {
-		Error string `json:"error"`
+		Message string `json:"message"`
 	}
 	_ = json.NewDecoder(resp.Body).Decode(&eb)
 	if resp.StatusCode != http.StatusNotImplemented {
 		t.Fatalf("status = %d, want 501", resp.StatusCode)
 	}
-	if !strings.Contains(eb.Error, "stats unavailable") {
-		t.Errorf("error = %q, want stats unavailable", eb.Error)
+	if !strings.Contains(eb.Message, "stats unavailable") {
+		t.Errorf("error = %q, want stats unavailable", eb.Message)
 	}
 }
 
@@ -805,14 +825,14 @@ func TestReadinessStoreDown(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	var eb struct {
-		Error string `json:"error"`
+		Message string `json:"message"`
 	}
 	_ = json.NewDecoder(resp.Body).Decode(&eb)
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", resp.StatusCode)
 	}
-	if !strings.Contains(eb.Error, "store unreachable") {
-		t.Errorf("error = %q, want store unreachable", eb.Error)
+	if !strings.Contains(eb.Message, "store unreachable") {
+		t.Errorf("error = %q, want store unreachable", eb.Message)
 	}
 }
 
@@ -826,14 +846,14 @@ func TestAnswerNotFound(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	var eb struct {
-		Error string `json:"error"`
+		Message string `json:"message"`
 	}
 	_ = json.NewDecoder(resp.Body).Decode(&eb)
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", resp.StatusCode)
 	}
-	if !strings.Contains(eb.Error, "no-such-trace") {
-		t.Errorf("error = %q, want the trace echoed", eb.Error)
+	if !strings.Contains(eb.Message, "no-such-trace") {
+		t.Errorf("error = %q, want the trace echoed", eb.Message)
 	}
 }
 
@@ -850,14 +870,14 @@ func TestAnswerStoreError(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	var eb struct {
-		Error string `json:"error"`
+		Message string `json:"message"`
 	}
 	_ = json.NewDecoder(resp.Body).Decode(&eb)
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", resp.StatusCode)
 	}
-	if !strings.Contains(eb.Error, "db melted") {
-		t.Errorf("error = %q, want the store failure", eb.Error)
+	if !strings.Contains(eb.Message, "db melted") {
+		t.Errorf("error = %q, want the store failure", eb.Message)
 	}
 }
 

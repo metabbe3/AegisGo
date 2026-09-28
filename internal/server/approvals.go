@@ -65,14 +65,14 @@ func listApprovals(w http.ResponseWriter, r *http.Request, src ApprovalSource) {
 	}
 	pend, err := src.PendingApprovals(r.Context(), limit)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "listing approvals: "+err.Error())
+		writeErr(w, http.StatusInternalServerError, "listing approvals: "+err.Error())
 		return
 	}
 	out := make([]approvalJSON, 0, len(pend))
 	for _, a := range pend {
 		out = append(out, approvalToJSON(a))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"pending": out, "count": len(out)})
+	writeOK(w, http.StatusOK, map[string]any{"pending": out, "count": len(out)})
 }
 
 // decideApproval handles POST /v1/approvals/{id}/decision.
@@ -80,13 +80,13 @@ func decideApproval(w http.ResponseWriter, r *http.Request, src ApprovalSource) 
 	idStr := r.PathValue("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil || id <= 0 {
-		writeError(w, http.StatusBadRequest, "bad approval id: "+idStr)
+		writeErr(w, http.StatusBadRequest, "bad approval id: "+idStr)
 		return
 	}
 	var body decisionRequest
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10))
 	if err := dec.Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "bad body: "+err.Error())
+		writeErr(w, http.StatusBadRequest, "bad body: "+err.Error())
 		return
 	}
 	state := ""
@@ -96,7 +96,7 @@ func decideApproval(w http.ResponseWriter, r *http.Request, src ApprovalSource) 
 	case "deny", "denied", "reject", "rejected":
 		state = "denied"
 	default:
-		writeError(w, http.StatusBadRequest, `decision must be "approve" or "deny"`)
+		writeErr(w, http.StatusBadRequest, `decision must be "approve" or "deny"`)
 		return
 	}
 	by := strings.TrimSpace(body.By)
@@ -105,7 +105,7 @@ func decideApproval(w http.ResponseWriter, r *http.Request, src ApprovalSource) 
 	}
 	ok, err := src.DecideApproval(r.Context(), id, state, by)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "deciding: "+err.Error())
+		writeErr(w, http.StatusInternalServerError, "deciding: "+err.Error())
 		return
 	}
 	if !ok {
@@ -113,7 +113,7 @@ func decideApproval(w http.ResponseWriter, r *http.Request, src ApprovalSource) 
 		// pending). Report the current row so the caller sees the truth.
 		a, found, _ := src.GetApproval(r.Context(), id)
 		if !found {
-			writeError(w, http.StatusNotFound, "approval not found")
+			writeErr(w, http.StatusNotFound, "approval not found")
 			return
 		}
 		writeJSON(w, http.StatusConflict, map[string]any{
@@ -123,8 +123,8 @@ func decideApproval(w http.ResponseWriter, r *http.Request, src ApprovalSource) 
 	}
 	a, found, err := src.GetApproval(r.Context(), id)
 	if err != nil || !found {
-		writeError(w, http.StatusInternalServerError, "re-reading decided approval")
+		writeErr(w, http.StatusInternalServerError, "re-reading decided approval")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": state, "approval": approvalToJSON(a)})
+	writeOK(w, http.StatusOK, map[string]any{"status": state, "approval": approvalToJSON(a)})
 }
