@@ -13,6 +13,7 @@ import (
 
 	"aegisgo/internal/config"
 	"aegisgo/internal/engine"
+	"aegisgo/internal/logwatch"
 	"aegisgo/internal/logx"
 	"aegisgo/internal/mcpclient"
 	"aegisgo/internal/miner"
@@ -317,6 +318,33 @@ func startTelegram(ctx context.Context, cfg config.Config, eng *engine.Engine,
 	// /status + /history share the store REST already serves.
 	dispatcher.SetStats(st)
 	dispatcher.SetHistory(st)
+
+	// 24/7 log watchdog (owner 28 Sep): watches live in SQLite, goroutine
+	// per watch, alerts → owner chat, add/remove from chat without rebuild.
+	watchMgr := logwatch.NewManager(16)
+	watchStore := &logwatch.StoreAdapter{
+		Exec: func(ctx context.Context, q string, args ...any) error { return st.Exec(ctx, q, args...) },
+		QueryRows: func(ctx context.Context, q string, args ...any) ([]map[string]any, error) {
+			return st.QueryMaps(ctx, q, args...)
+		},
+	}
+	wgate := &WatchGate{
+		Mgr:   watchMgr,
+		Store: watchStore,
+		Notify: func(text string) {
+			for _, chat := range cfg.TelegramChats {
+				if _, err := client.SendMessage(context.Background(), chat, text, 0); err != nil {
+					logger.Error("watchdog alert send", "error", err)
+				}
+			}
+		},
+	}
+	if n, err := wgate.StartWatches(tgCtx); err != nil {
+		logger.Error("watchdog rehydrate", "error", err)
+	} else if n > 0 {
+		logger.Info("watchdog rehydrated", "watches", n)
+	}
+	dispatcher.SetWatch(wgate.HandleWatchText)
 
 	// /jobs and /cancel_job share the job manager REST already serves.
 	dispatcher.SetJobs(jobsSource{jobs})

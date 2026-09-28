@@ -190,6 +190,32 @@ func (s *Store) RecentDecisions(ctx context.Context, limit int) ([]Approval, err
 	return out, rows.Err()
 }
 
+// migrateV7 adds the log_watches table (24/7 log watchdog, owner
+// directive 28 Sep — definitions persist so watches survive restarts and
+// are addable/removable at runtime from chat).
+func (s *Store) migrateV7() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS log_watches (
+		name TEXT PRIMARY KEY,
+		path TEXT NOT NULL,
+		pattern TEXT NOT NULL,
+		every_ms INTEGER NOT NULL DEFAULT 30000,
+		cooldown_ms INTEGER NOT NULL DEFAULT 600000,
+		created_ts TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+	)`); err != nil {
+		tx.Rollback()
+		return fmt.Errorf("migrating to v7: %w", err)
+	}
+	if _, err := tx.Exec(`PRAGMA user_version = 7`); err != nil {
+		tx.Rollback()
+		return fmt.Errorf("migrating to v7: %w", err)
+	}
+	return tx.Commit()
+}
+
 // migrateV6 adds the confidence column to audit_events (decision engine,
 // owner directive 28 Sep). Existing rows keep 0 = "scored before the
 // feature existed"; new rows always carry a score.

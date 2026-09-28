@@ -224,3 +224,42 @@ see WORKFLOW.md.
 [mark3labs/mcp-go]: https://github.com/mark3labs/mcp-go
 [modernc.org/sqlite]: https://gitlab.com/cznic/sqlite
 [Ollama]: https://ollama.com
+
+
+## Command reference (Telegram)
+
+**⚡ Instant (rule-based, free)**
+- `/uptime` `/disk` `/memory` `/hostname` `/kernel` `/who`
+
+**📅 Scheduler**
+- `/every 30m /disk` · `/scheduled` · `/unschedule #1`
+
+**📄 Data**
+- `/csv_summary <path>` · `/csv_head <path> [rows]` · `/rules`
+
+**👁 Log watchdog 24/7** *(new — merge #46)*
+- `/watch name=gw | path=/tmp/gw.log | pattern=panic|FATAL | every=30s | cooldown=10m` — start watching (live instantly, persists across restarts)
+- `/unwatch <name>` — stop a watch
+- `/watchlist` — all watches + match counts
+- `/analyze /path/app.log -n 500` — deterministic pattern report: top templates, top error shapes, error rate (no LLM)
+
+Watches run as one goroutine each (`internal/logwatch`), survive restarts (SQLite `log_watches`, schema v7), detect log rotation, and de-dupe alerts with a per-watch cooldown. Alerts land in the owner chat.
+
+**🛠 Admin (HITL-gated)**
+- `/status` · `/approvals` · `/approve <id>` · `/deny <id>`
+- `/reload_rules` (✅/🚫 gated) — hot-reload router rules
+- `/addrule name=X | pattern=/x | tool=read_doc | args={"path":"docs/$1"}` — add a router rule from chat (gated; tools: `read_csv` `csv_stats` `read_doc`)
+
+**⬇️ Other**
+- `/jobs` · `/cancel_job <id>` · `/help`
+
+## REST API response format
+
+Every `/v1` endpoint answers with a standard envelope:
+
+```json
+{"success": true,  "code": "OK",          "data": {...}}
+{"success": false, "code": "BAD_REQUEST", "message": "invalid JSON body: …", "reason": "request"}
+```
+
+`code` is a stable machine token (`OK`, `ACCEPTED`, `BAD_REQUEST`, `UNAUTHORIZED`, `NOT_FOUND`, `CONFLICT`, `UNAVAILABLE`, `INTERNAL`), `message` the human explanation, `reason` the failure category (`auth`, `request`, `not_found`, `state`, `provider`, `internal`). `/healthz` and `/readyz` stay plain for orchestrators.

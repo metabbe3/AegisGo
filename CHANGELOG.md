@@ -184,3 +184,29 @@ error code and reason" + "add rules/command from telegram".
 
 Gates: vet clean, 22/22 pkgs ok, coverage 90.0% (gate 90), make check
 clean. jsonField helper removed (dead code caught by the gate itself).
+
+
+## [2026-09-28] 24/7 log watchdog + markdown replies (merge #46)
+
+Owner directive 28 Sep: "train it to read log files and find patterns,
+monitor 24h like a watchdog", "add/remove watches from Telegram, no
+rebuild", "analyze logs for patterns", "reformat responses markdown",
+"update docs".
+
+1) internal/logwatch — one goroutine per watch (loop.Periodic), stat+tail
+   polling with rotation detection, per-watch cooldown de-dup, bounded
+   alerts. Definitions persist in SQLite log_watches (v7) and rehydrate
+   at boot: /watch from chat is live instantly and survives restarts —
+   no binary rebuild.
+2) /analyze — deterministic pattern analysis: normalize masks UUID/IP/
+   DUR/"STR"/[...]/digits/volatile keys (trace=abc → trace=N), tallies
+   top templates + top error shapes + error rate over the last N lines.
+   No LLM in the loop.
+3) Telegram: SendMarkdown opt-in (our generated texts only — model
+   answers stay plain so arbitrary text never hits the markup parser);
+   /help redesigned into grouped markdown sections.
+4) Makefile cover now uses -coverpkg across packages (cross-package
+   adapter coverage was invisible; 89.8 → 90.1 honest).
+5) README command reference + API envelope docs.
+
+Gates: vet clean, 23/23 pkgs, coverage 90.1%, make check clean.

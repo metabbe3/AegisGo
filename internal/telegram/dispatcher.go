@@ -35,7 +35,9 @@ type Dispatcher struct {
 	// unset). Secure default: an unknown chat must never steer the agent.
 	allow map[int64]bool
 	// rules renders the /rules listing.
-	rules  func() []string
+	rules func() []string
+	// watch handles the /watch family (24/7 log watchdog).
+	watch  func(ctx context.Context, text string) string
 	logger *slog.Logger
 	// approver backs the HITL commands; nil disables them.
 	approver approver
@@ -132,7 +134,7 @@ func (d *Dispatcher) Process(ctx context.Context, row InboxRow) {
 
 	switch row.Text {
 	case "/help", "/start":
-		d.claimAndSend(ctx, row, d.helpText())
+		d.claimAndSendMD(ctx, row, d.helpText())
 		return
 	case "/rules":
 		d.claimAndSend(ctx, row, d.rulesText())
@@ -141,7 +143,7 @@ func (d *Dispatcher) Process(ctx context.Context, row InboxRow) {
 		d.claimAndSend(ctx, row, d.approvalsText(ctx))
 		return
 	case "/status", "/stats":
-		d.claimAndSend(ctx, row, d.statusText(ctx))
+		d.claimAndSendMD(ctx, row, d.statusText(ctx))
 		return
 	case "/history":
 		d.claimAndSend(ctx, row, d.historyText(ctx))
@@ -158,6 +160,12 @@ func (d *Dispatcher) Process(ctx context.Context, row InboxRow) {
 	case "/unschedule":
 		d.claimAndSend(ctx, row, d.sched.Unregister(row.Text))
 		return
+	case "/watch", "/unwatch", "/watchlist", "/analyze":
+		if d.watch == nil {
+			d.claimAndSend(ctx, row, "Watchdog not wired.")
+			return
+		}
+		d.claimAndSendMD(ctx, row, d.watch(ctx, row.Text))
 	case "/deny":
 		d.claimAndSend(ctx, row, d.decideText(ctx, row, "denied"))
 		return
@@ -197,7 +205,7 @@ func (d *Dispatcher) Process(ctx context.Context, row InboxRow) {
 	// listing) fall through to the engine and answer via their rule; anything
 	// else gets the deterministic help text instead of a fallback call.
 	if strings.HasPrefix(row.Text, "/") && !d.knownRouterCommand(row.Text) {
-		d.claimAndSend(ctx, row, d.unknownCommandText(row.Text))
+		d.claimAndSendMD(ctx, row, d.unknownCommandText(row.Text))
 		return
 	}
 
@@ -248,6 +256,17 @@ func (d *Dispatcher) Process(ctx context.Context, row InboxRow) {
 // claimAndSend is the /help-style path: claim, then send, releasing the
 // claim if the send fails outright (so a redelivery can retry).
 func (d *Dispatcher) claimAndSend(ctx context.Context, row InboxRow, body string) {
+	d.claimAndSendOpt(ctx, row, body, false)
+}
+
+// claimAndSendMD sends OUR generated text as Markdown (bold headers,
+// `code` spans). Model answers keep the plain path — arbitrary text must
+// never hit the markup parser.
+func (d *Dispatcher) claimAndSendMD(ctx context.Context, row InboxRow, body string) {
+	d.claimAndSendOpt(ctx, row, body, true)
+}
+
+func (d *Dispatcher) claimAndSendOpt(ctx context.Context, row InboxRow, body string, md bool) {
 	claimed, err := d.inbox.ClaimReply(ctx, row.UpdateID)
 	if err != nil || !claimed {
 		if err != nil {
@@ -255,10 +274,26 @@ func (d *Dispatcher) claimAndSend(ctx context.Context, row InboxRow, body string
 		}
 		return
 	}
-	if _, err := d.throttledSend(ctx, row.ChatID, body); err != nil {
-		d.logger.Error("telegram: sending reply", "chat_id", row.ChatID, "error", err)
+	if err := d.waitChat(ctx, row.ChatID); err != nil {
+		d.logger.Error("telegram: throttle wait", "chat_id", row.ChatID, "error", err)
+		d.release(ctx, row.UpdateID)
+		return
+	}
+	var msgID int64
+	var sendErr error
+	mc, ok := d.client.(interface {
+		SendMarkdown(ctx context.Context, chatID int64, text string, replyTo int64, md bool) (int64, error)
+	})
+	if ok && md {
+		msgID, sendErr = mc.SendMarkdown(ctx, row.ChatID, body, 0, true)
+	} else {
+		msgID, sendErr = d.client.SendMessage(ctx, row.ChatID, body, 0)
+	}
+	if sendErr != nil {
+		d.logger.Error("telegram: sending reply", "chat_id", row.ChatID, "error", sendErr)
 		d.release(ctx, row.UpdateID)
 	}
+	_ = msgID // message id unused today; kept for future edits
 }
 
 // release undoes a claim when the send failed deterministically (API error,
@@ -297,15 +332,26 @@ func formatReply(res engine.Result) string {
 }
 
 func (d *Dispatcher) helpText() string {
-	return "AegisGo agent — hybrid answers.\n" +
-		"Router commands answer instantly and free: /uptime /disk /memory /hostname /kernel /who\n" +
-		"Schedule any command: /every 30m /disk · /scheduled · /unschedule #1\n" +
-		"/csv_summary <path> · /csv_head <path> [rows]\n" +
-		"/rules lists every active rule.\n" +
-		"HITL: /approvals lists pending · /approve <id> · /deny <id> (bare /approve decides the oldest).\n/status (alias /stats) — one-glance health: runs, deflection, latency, rules.\n/reload_rules — L2 action: hot-reload router rules after approval (✅/🚫 buttons).\n/addrule name=X | pattern=/x | tool=read_doc | args={\"path\":\"docs/$1\"} — add a command from chat (L2 gated; tools: read_csv, csv_stats, read_doc).\n" +
-		"/jobs — background download jobs: id, state, age.\n" +
-		"/cancel_job <id> — stop a running download (id from /jobs).\n" +
-		"Anything else goes to the LLM (if enabled)."
+	return "🤖 *AegisGo* — hybrid agent\n\n" +
+		"*⚡ Instan & gratis* (rule)\n" +
+		"`/uptime` `/disk` `/memory` `/hostname` `/kernel` `/who`\n\n" +
+		"*📅 Scheduler*\n" +
+		"`/every 30m /disk` · `/scheduled` · `/unschedule #1`\n\n" +
+		"*📄 Data*\n" +
+		"`/csv_summary <path>` · `/csv_head <path> [rows]`\n" +
+		"`/rules` — daftar rule aktif\n\n" +
+		"*👁 Log watchdog 24/7*\n" +
+		"`/watch name=gw | path=/tmp/gw.log | pattern=panic|FATAL | every=30s`\n" +
+		"`/unwatch <name>` · `/watchlist`\n" +
+		"`/analyze /tmp/gw.log -n 500` — top pattern & error rate\n\n" +
+		"*🛠 Admin (HITL)*\n" +
+		"`/status` — health ringkas\n" +
+		"`/approvals` · `/approve <id>` · `/deny <id>`\n" +
+		"`/reload_rules` — hot-reload rules (✅/🚫)\n" +
+		"`/addrule name=X | pattern=/x | tool=read_doc | args={\"path\":\"docs/$1\"}`\n\n" +
+		"*⬇️ Lainnya*\n" +
+		"`/jobs` · `/cancel_job <id>`\n\n" +
+		"Selain command → LLM (jika aktif)."
 }
 
 func (d *Dispatcher) rulesText() string {
@@ -436,6 +482,9 @@ func (d *Dispatcher) statusText(ctx context.Context) string {
 
 // SetHistory wires the decisions source for /history.
 func (d *Dispatcher) SetHistory(h historian) { d.hist = h }
+
+// SetWatch wires the /watch family (24/7 log watchdog, owner 28 Sep).
+func (d *Dispatcher) SetWatch(f func(ctx context.Context, text string) string) { d.watch = f }
 
 // joblister is the background-jobs slice /jobs needs. The tools.JobManager
 // satisfies it via ListJobs; the narrow interface keeps the dispatcher free

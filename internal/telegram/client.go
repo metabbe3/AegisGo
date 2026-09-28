@@ -165,12 +165,23 @@ func (c *HTTPClient) GetMe(ctx context.Context) (string, error) {
 }
 
 func (c *HTTPClient) SendMessage(ctx context.Context, chatID int64, text string, replyTo int64) (int64, error) {
+	return c.SendMarkdown(ctx, chatID, text, replyTo, false)
+}
+
+// SendMarkdown posts text with optional legacy-Markdown parsing. Engine
+// answers stay plain (arbitrary model/user text must never hit a markup
+// parser); only OUR generated texts (help, status, watch reports) opt in.
+func (c *HTTPClient) SendMarkdown(ctx context.Context, chatID int64, text string, replyTo int64, md bool) (int64, error) {
 	in := struct {
 		ChatID         int64  `json:"chat_id"`
 		Text           string `json:"text"`
+		ParseMode      string `json:"parse_mode,omitempty"`
 		ReplyToMessage int64  `json:"reply_to_message_id,omitempty"`
 		DisableWebPage bool   `json:"disable_web_page_preview"`
 	}{ChatID: chatID, Text: text, ReplyToMessage: replyTo, DisableWebPage: true}
+	if md {
+		in.ParseMode = "Markdown"
+	}
 	var resp struct {
 		Result struct {
 			MessageID int64 `json:"message_id"`

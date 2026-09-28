@@ -53,7 +53,7 @@ check:
 COVER_OUT := coverage.out
 COVER_MIN := 90
 cover: check
-	go test -covermode=atomic -coverprofile=$(COVER_OUT) $(PKGS)
+	go test -covermode=atomic -coverpkg=$(shell go list ./... | grep -v /internal/pb | tr '\n' ',') -coverprofile=$(COVER_OUT) $(PKGS)
 	go tool cover -func=$(COVER_OUT) | tail -n 1
 	@pct=$$(go tool cover -func=$(COVER_OUT) | awk '/^total:/ {sub(/%/,"",$$3); print $$3}'); \
 	awk -v p=$$pct -v m=$(COVER_MIN) 'BEGIN { if (p+0 < m) { printf "FAIL: coverage %.1f%% < %d%%\n", p, m; exit 1 } printf "OK: coverage %.1f%% >= %d%%\n", p, m }'
