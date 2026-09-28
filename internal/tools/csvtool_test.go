@@ -116,7 +116,7 @@ func TestBuiltinRegistry(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{"read_csv", "csv_stats", "read_doc", "system_command", "sql_query",
-		"make_dir", "list_dir", "download", "job_status", "analyze_log"}
+		"make_dir", "list_dir", "download", "job_status", "analyze_log", "ops_forecast"}
 	if len(set) != len(want) {
 		t.Fatalf("got %d tools, want %d", len(set), len(want))
 	}

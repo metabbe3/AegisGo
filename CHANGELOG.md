@@ -246,3 +246,9 @@ ada tools bawaan".
   path, one security boundary.
 - /addrule allowlist += analyze_log: new commands wireable from chat.
 Gates: vet, 24/24 pkgs, coverage 90.0%, check.
+
+
+## 2026-09-28 — merge #49 feat/ops-forecast
+- internal/opsforecast: time-bucket a log's timestamps (1-60min windows), least-squares slope + EWMA, ETA-to-threshold, level + confidence (deterministic, no LLM)
+- tools: ops_forecast (tool #11) — metric err_rate|req_rate|latency_p95, bounded output, recommended_action hints (scale-out candidate, page-now, watch)
+- seeded rule /forecast → ops_forecast; coverage gate 90.1%

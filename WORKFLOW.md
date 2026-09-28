@@ -280,3 +280,21 @@ KeepAlive + 30s throttle; binary at `~/.hermes/bin`, token stays in the
 env file outside the repo). Verified: kill → auto-restart <30s, single
 poller (no Telegram 409). On Linux use your systemd unit of choice —
 the binary is the same.
+
+
+## Recipe — predictive ops forecast (merge #49)
+
+```
+# forecast error-rate trend from a service log, 1-minute buckets
+/forecast path=logs/demo-api.log metric=err_rate threshold=10 window_min=1
+
+# latency: when does p95 cross 2s?
+/forecast path=logs/demo-api.log metric=latency_p95 threshold=2000
+
+# traffic ramp ahead of a launch
+/forecast path=logs/demo-api.log metric=req_rate threshold=500 window_min=5
+```
+Deterministic (zero LLM): buckets timestamps → least-squares + EWMA → ETA to
+threshold, level (stable/rising/falling/volatile), confidence, and a bounded
+`recommended_action` (scaling hint is a recommendation — executor wiring is a
+future gated action per ADR-0005/0008).

@@ -72,6 +72,10 @@ func Builtin(opts Options) ([]Tool, error) {
 	if err != nil {
 		return nil, err
 	}
+	opsForecast, err := NewOpsForecast(opts.Workspace)
+	if err != nil {
+		return nil, err
+	}
 	return []Tool{readCSV, csvStats, readDoc, sysCmd, sqlQuery,
-		makeDir, listDir, download, jobStatus, analyzeLog}, nil
+		makeDir, listDir, download, jobStatus, analyzeLog, opsForecast}, nil
 }
