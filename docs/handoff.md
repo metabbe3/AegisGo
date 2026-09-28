@@ -145,3 +145,10 @@ transport HTTP penuh. Queue malam ini:
 - /ADDRULE: gated L2 (ADR-0007); parse strict PRE-approval; allowlist read_csv/csv_stats/read_doc; INSERT origin=manual + Swap; row persist jika Swap gagal (retry via /reload_rules).
 - Coverage sempat 89.6% → jsonField dead-code dihapus + test HandleText branches → 90.0%.
 - Deploy binary ke live bot = malam ini Builder 21:30 (protokol deploy-sekali-akhir-slot).
+
+## 2026-09-28 sore — merge #46 log watchdog + markdown (owner-direct)
+- feat/logwatchdog-md-help → main 9a4ccae; vet, 23/23, cover 90.1% (cross-pkg -coverpkg), check.
+- LOGWATCH: internal/logwatch (goroutine per watch via loop.Periodic, rotation-aware tail, cooldown dedup, bounded alerts) + SQLite log_watches V7 + rehydrate at boot. Parser: pipe dalam nilai pattern (panic|FATAL) di-merge ke segmen sebelumnya.
+- TELEGRAM: /watch /unwatch /watchlist /analyze (markdown), SendMarkdown opt-in — jawaban engine TETAP plain (anti parse-error), /help baru grouped sections.
+- LESSON hari ini: (1) import cycle store↔logwatch — schema string milik store yang menjalankan; (2) coverage per-pkg menutup mata terhadap adapter yang dites dari pkg lain → -coverpkg; (3) test-driven menangkap 3 bug nyata: pipe-in-regex, volatile-key mask order (UUID sebelum key), name min-2-char.
+- Makefile cover: -coverpkg cross-package (89.8 → 90.1).
