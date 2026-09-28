@@ -247,6 +247,38 @@ func (s *Store) Flush(ctx context.Context) error {
 // Exec runs a write through the batch queue and waits for it. Rare,
 // admin-shaped writes (rule seeding) use this; hot paths use the Audit
 // helpers, which never block.
+// QueryMaps runs a query and returns every row as a map keyed by column
+// name (lightweight read helper for adapters that don't want typed scans;
+// bounded by the caller's LIMIT — keep queries small).
+func (s *Store) QueryMaps(ctx context.Context, query string, args ...any) ([]map[string]any, error) {
+	rows, err := s.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+	var out []map[string]any
+	for rows.Next() {
+		vals := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			return nil, err
+		}
+		m := make(map[string]any, len(cols))
+		for i, c := range cols {
+			m[c] = vals[i]
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) Exec(ctx context.Context, query string, args ...any) error {
 	return s.execSync(ctx, query, args...)
 }
@@ -293,6 +325,11 @@ func (s *Store) migrate() error {
 	}
 	if version < 6 {
 		if err := s.migrateV6(); err != nil {
+			return err
+		}
+	}
+	if version < 7 {
+		if err := s.migrateV7(); err != nil {
 			return err
 		}
 	}

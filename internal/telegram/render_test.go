@@ -46,3 +46,26 @@ func TestApprovalLineNeverRawJSON(t *testing.T) {
 		t.Fatalf("missing human payload: %q", line)
 	}
 }
+
+func TestHumanValueBranches(t *testing.T) {
+	cases := []struct {
+		in   any
+		want string
+	}{
+		{"short", "short"},
+		{strings.Repeat("a", 80), strings.Repeat("a", 60) + "…"},
+		{"reload_rules", "reload rules"},
+		{"path/with_slash", "path/with_slash"},
+		{float64(42), "42"},
+		{3.5, "3.5"},
+		{true, "yes"},
+		{false, "no"},
+		{nil, "—"},
+		{[]int{1, 2}, "[1,2]"},
+	}
+	for _, c := range cases {
+		if got := humanValue(c.in); got != c.want {
+			t.Errorf("humanValue(%v) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
