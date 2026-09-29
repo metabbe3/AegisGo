@@ -180,3 +180,16 @@ transport HTTP penuh. Queue malam ini:
 - Live: /forecast + metric=/threshold= → regex_router 0ms HIGH; changelog==merge; queue sync 35.
 - Jebakan: args_template named-group $p DITOLAK engine (harus $1 positional); cp binary lintas path = Gatekeeper kill.
 - Next: scaling executor via system_command catalog + HITL gate (ADR-0005/0008) bila owner approve.
+
+## 2026-09-28 18:20 — agent utama (watchdog spam fix)
+- Watchdog 30m spam sejak deploy #49: pattern lama hanya match 'aegis-serve' padahal live binary = repo bin/aegis (Gatekeeper trap) → healthz OK tapi divonis DOWN. FIX aegisgo_watch.sh: match kedua nama + BARU aegisgo_start.py (idempotent restart dari repo binary, bukan launchctl). Lesson: ganti runtime = update pattern monitor DI SIKIT yang sama; healthz compare harus .strip() (build baru append newline).
+
+## 2026-09-28 21:40 — CTO Builder (batch-6 planning)
+- Queue batch-5 HABIS: dashboard-SSE #36/#40, /jobs #41-ish, MCP-HTTP #43, cancel #42 — semua merged. Corpus miner 10 event (miner v2 & WAL tuning belum layak data).
+- BATCH MALAM INI: #50 /health self-audit Telegram (outcome+confidence+latency rollup); #51 /register_rules hot-rule-import via download+HITL+preview; #52 /watch+/analyze → tool-boundary containment (Hard Rule 2 debt); #53 stats window days=N + digest health line.
+- Kandidat gugur malam ini: dashboard tail-dedupe (feed cuma 1 event, noise < signal), digest outcome health (data sudah ada di /health baru).
+- Live: PID 71519 healthz ok; handoff mod (watchdog fix 18:20) akan ikut commit docs batch ini.
+
+## 2026-09-29 21:5x — CTO Builder (batch-7)
+- Batch plan: #53 stats-window (M) → DEPLOY checkpoint → #54 REST /v1/health → #55 dashboard health card → #52 watch/analyze tool-boundary containment. #51 hot-rule-import DEFER kalau budget < estimasi.
+- #53: store.StatsWindow + REST ?days= + ctl stats days= + /stats days= prefix arm + digest "runs (24h)". Gate hijau: vet/test/check/cover 90.1%.

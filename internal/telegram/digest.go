@@ -52,8 +52,13 @@ func (dg *Digest) text(ctx context.Context) string {
 	fmt.Fprintf(&b, "uptime %s\n", up)
 
 	if dg.stats != nil {
-		if snap, err := dg.stats.Stats(ctx); err == nil && snap != nil {
-			fmt.Fprintf(&b, "runs %d · deflection %.1f%%\n",
+		// Window the digest to the last 24h: cumulative totals read as
+		// "nothing happened today" on a long-lived store — the digest's
+		// question is "what did the agent do since yesterday" (ADR-0010
+		// spirit: per-section honest degrade, no fabricated freshness).
+		snap, err := dg.stats.StatsWindow(ctx, 1)
+		if err == nil && snap != nil {
+			fmt.Fprintf(&b, "runs (24h) %d · deflection %.1f%%\n",
 				snap.TotalRuns, snap.DeflectionRate*100)
 			if avg, ok := snap.AvgLatencyMS["regex_router"]; ok {
 				fmt.Fprintf(&b, "router answers in %dms\n", avg)

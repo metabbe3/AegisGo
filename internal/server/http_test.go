@@ -23,7 +23,6 @@ import (
 	"aegisgo/internal/trace"
 )
 
-
 // decodeInto unwraps the standard envelope and decodes data into target.
 func decodeInto(t *testing.T, resp *http.Response, target any) {
 	t.Helper()
@@ -42,6 +41,7 @@ func decodeInto(t *testing.T, resp *http.Response, target any) {
 		t.Fatalf("decode data: %v", err)
 	}
 }
+
 // fakeEngine answers instantly and counts runs; prompts containing "/"
 // route deterministically (like a real router hit).
 type fakeEngine struct {
@@ -926,4 +926,58 @@ func TestSSEWriteErrors(t *testing.T) {
 			t.Error("want a write error from a dead connection")
 		}
 	})
+}
+
+// --- stats window (merge #53) ---
+
+// windowStats records the window each call saw.
+type windowStats struct{ days []int }
+
+func (w *windowStats) Stats(ctx context.Context) (*store.StatsSnapshot, error) {
+	return w.StatsWindow(ctx, 0)
+}
+func (w *windowStats) StatsWindow(ctx context.Context, days int) (*store.StatsSnapshot, error) {
+	w.days = append(w.days, days)
+	return &store.StatsSnapshot{TotalRuns: 1, WindowDays: days}, nil
+}
+
+// TestStatsEndpointWindow: ?days=N reaches StatsWindow; bad values 400.
+func TestStatsEndpointWindow(t *testing.T) {
+	fs := &windowStats{}
+	srv := httptest.NewServer(Handler(Deps{Engine: &fakeEngine{}, Stats: fs}))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/v1/stats?days=7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var env struct {
+		Success bool                 `json:"success"`
+		Data    *store.StatsSnapshot `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		t.Fatal(err)
+	}
+	if !env.Success || env.Data == nil || env.Data.WindowDays != 7 {
+		t.Fatalf("window response = %+v, want success + WindowDays=7", env)
+	}
+
+	resp2, err := http.Get(srv.URL + "/v1/stats?days=0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp2.Body.Close()
+	if resp2.StatusCode != http.StatusBadRequest {
+		t.Errorf("days=0 status = %d, want 400", resp2.StatusCode)
+	}
+
+	resp3, err := http.Get(srv.URL + "/v1/stats")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp3.Body.Close()
+	if got := fs.days; len(got) != 2 || got[0] != 7 || got[1] != 0 {
+		t.Errorf("windows seen = %v, want [7 0] (explicit window then all-time default)", got)
+	}
 }

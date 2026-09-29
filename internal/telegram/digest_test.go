@@ -41,7 +41,7 @@ func TestDigestHuman(t *testing.T) {
 		t.Fatalf("digest sends = %d, want 1", len(sink.texts))
 	}
 	got := sink.texts[0]
-	for _, want := range []string{"uptime", "runs", "no approvals waiting", "✅ #1 System command"} {
+	for _, want := range []string{"uptime", "runs (24h)", "no approvals waiting", "✅ #1 System command"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("digest missing %q:\n%s", want, got)
 		}

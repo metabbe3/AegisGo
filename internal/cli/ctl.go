@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 
@@ -42,7 +43,7 @@ func runCtl(args []string, stdout io.Writer) error {
 	case "rules":
 		return rulesCmd(ctx, st, cfg, args[1:], stdout)
 	case "stats":
-		return statsCmd(ctx, st, stdout)
+		return statsCmd(ctx, st, args[1:], stdout)
 	case "jobs":
 		return jobsCmd(ctx, cfg, stdout)
 	case "replay":
@@ -56,7 +57,7 @@ func runCtl(args []string, stdout io.Writer) error {
 }
 
 func ctlUsage() error {
-	return fmt.Errorf("usage: aegis ctl rules list|mine|promote <name>|demote <name> | stats | jobs | replay <trace-id>")
+	return fmt.Errorf("usage: aegis ctl rules list|mine|promote <name>|demote <name> | stats [days=N] | jobs | replay <trace-id>")
 }
 
 // jobsCmd lists live background jobs from the running server's GET
@@ -152,8 +153,22 @@ func rulesCmd(ctx context.Context, st *store.Store, cfg config.Config, args []st
 	}
 }
 
-func statsCmd(ctx context.Context, st *store.Store, stdout io.Writer) error {
-	s, err := st.Stats(ctx)
+// statsCmd prints the stats snapshot, optionally windowed: `ctl stats
+// days=7` narrows audit/corpus aggregates to the last 7 days.
+func statsCmd(ctx context.Context, st *store.Store, args []string, stdout io.Writer) error {
+	days := 0
+	for _, a := range args {
+		v, ok := strings.CutPrefix(a, "days=")
+		if !ok {
+			return fmt.Errorf("unknown stats arg %q (want days=N)", a)
+		}
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 3650 {
+			return fmt.Errorf("days must be an integer 1-3650, got %q", v)
+		}
+		days = n
+	}
+	s, err := st.StatsWindow(ctx, days)
 	if err != nil {
 		return err
 	}

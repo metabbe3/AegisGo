@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,6 +35,7 @@ type Engine interface {
 // StatsSource computes the stats snapshot.
 type StatsSource interface {
 	Stats(ctx context.Context) (*store.StatsSnapshot, error)
+	StatsWindow(ctx context.Context, days int) (*store.StatsSnapshot, error)
 }
 
 // AnswerStore is the async answer store the API polls.
@@ -382,13 +384,24 @@ func sseWrite(w http.ResponseWriter, fl http.Flusher, event string, payload any)
 	return nil
 }
 
-// statsHandler is GET /v1/stats — the observability surface.
+// statsHandler is GET /v1/stats — the observability surface. Optional
+// ?days=N narrows the audit/corpus aggregates to the last N days
+// (1-3650); the default stays all-time so existing consumers are stable.
 func statsHandler(w http.ResponseWriter, r *http.Request, d Deps) {
 	if d.Stats == nil {
 		writeErr(w, http.StatusNotImplemented, "stats unavailable")
 		return
 	}
-	s, err := d.Stats.Stats(r.Context())
+	days := 0
+	if v := r.URL.Query().Get("days"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 3650 {
+			writeErr(w, http.StatusBadRequest, "days must be an integer 1-3650")
+			return
+		}
+		days = n
+	}
+	s, err := d.Stats.StatsWindow(r.Context(), days)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return

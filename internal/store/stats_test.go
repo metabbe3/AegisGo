@@ -2,8 +2,10 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestStatsEmpty(t *testing.T) {
@@ -140,5 +142,84 @@ func TestReplayEmptyTrace(t *testing.T) {
 	}
 	if len(trail) != 0 {
 		t.Errorf("trail = %d rows, want 0", len(trail))
+	}
+}
+
+// --- stats window (merge #53) ---
+
+// TestStatsWindowExcludesOldRows proves the window actually filters: rows
+// with a ts older than the cutoff disappear from TotalRuns/BySource/TopFallbacks
+// while rules stay global. It FAILS without the change (Stats had no window).
+func TestStatsWindowExcludesOldRows(t *testing.T) {
+	s := openMem(t)
+	ctx := context.Background()
+	old := time.Now().UTC().Add(-72 * time.Hour).Format(time.RFC3339Nano)
+	fresh := time.Now().UTC().Format(time.RFC3339Nano)
+	tss := []string{old, old, fresh}
+	for i := range tss {
+		s.Audit(ctx, AuditEvent{
+			TraceID: fmt.Sprintf("w%d", i), Interface: IFaceCLI,
+			DecisionSource: SourceRouter, RuleID: "uptime", Prompt: "/uptime",
+			LatencyMS: int64(i + 1),
+		})
+	}
+	// Overwrite ts post-insert: Audit mints now, and the window semantics
+	// live in the SQL layer, not the Go clock.
+	mustFlush(t, s)
+	for i := range []string{old, old, fresh} {
+		mustExec(t, s, `UPDATE audit_events SET ts=? WHERE trace_id=?`,
+			[]string{old, old, fresh}[i], fmt.Sprintf("w%d", i))
+	}
+	s.RecordFallback(FallbackEvent{TraceID: "fo", NormalizedPrompt: "old shape", RawPrompt: "x"})
+	s.RecordFallback(FallbackEvent{TraceID: "fn", NormalizedPrompt: "new shape", RawPrompt: "y"})
+	mustFlush(t, s)
+	mustExec(t, s, `UPDATE fallback_events SET ts=? WHERE trace_id='fo'`, old)
+	mustFlush(t, s)
+
+	snap, err := s.StatsWindow(ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.WindowDays != 1 {
+		t.Errorf("WindowDays = %d, want 1", snap.WindowDays)
+	}
+	if snap.TotalRuns != 1 {
+		t.Errorf("TotalRuns = %d, want 1 (only the fresh row inside 1 day)", snap.TotalRuns)
+	}
+	if n := snap.BySource[SourceRouter]; n != 1 {
+		t.Errorf("BySource[router] = %d, want 1", n)
+	}
+	if len(snap.TopFallbacks) != 1 || snap.TopFallbacks[0].Shape != "new shape" {
+		t.Errorf("TopFallbacks = %v, want only the fresh shape", snap.TopFallbacks)
+	}
+
+	// All-time must still see everything (regression guard).
+	all, err := s.Stats(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if all.TotalRuns != 3 || len(all.TopFallbacks) != 2 {
+		t.Errorf("all-time snap = %d runs / %v shapes, want 3/2", all.TotalRuns, all.TopFallbacks)
+	}
+	if all.WindowDays != 0 {
+		t.Errorf("all-time WindowDays = %d, want 0", all.WindowDays)
+	}
+}
+
+// TestStatsWindowStringCompare pins the ts-format assumption: RFC3339Nano
+// stored TEXT must compare >= datetime('now','-N days') — if the driver or
+// the format ever drifts, this fails before any snapshot ships wrong data.
+func TestStatsWindowStringCompare(t *testing.T) {
+	s := openMem(t)
+	ctx := context.Background()
+	s.Audit(ctx, AuditEvent{TraceID: "sc", Interface: IFaceCLI,
+		DecisionSource: SourceRouter, Prompt: "/uptime"})
+	mustFlush(t, s)
+	snap, err := s.StatsWindow(ctx, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.TotalRuns != 1 {
+		t.Errorf("TotalRuns = %d, want 1 — RFC3339Nano TEXT no longer compares against datetime('now') ISO strings", snap.TotalRuns)
 	}
 }
