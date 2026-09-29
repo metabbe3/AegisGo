@@ -3,6 +3,7 @@ package telegram
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -613,3 +614,35 @@ type gatedStub struct {
 }
 
 func (g gatedStub) HandleText(ctx context.Context, text string) string { return g.fn(ctx, text) }
+
+// --- /stats days=N window (merge #53) ---
+
+// TestStatsDaysCommand: the prefix arm routes "/stats days=7" and the
+// reply carries the window line. Fails without the window change (bare
+// /stats never matched an argument and the snapshot had no window).
+func TestStatsDaysCommand(t *testing.T) {
+	c := &fakeClient{}
+	d, inbox, st := dispatcherWithStore(t, fakeEngine{answer: "x"}, c,
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+	d.SetStats(st)
+	ctx := t.Context()
+	st.Audit(ctx, store.AuditEvent{TraceID: "w1", Interface: "telegram",
+		DecisionSource: store.SourceRouter, RuleID: "uptime", Prompt: "/uptime", LatencyMS: 3})
+	for i := 0; i < 40; i++ {
+		st.Audit(ctx, store.AuditEvent{TraceID: fmt.Sprintf("old%d", i), Interface: "telegram",
+			DecisionSource: store.SourceLLM, Model: "m", Prompt: "x", LatencyMS: 9})
+	}
+	d.Process(t.Context(), feed(t, inbox, 9201, "/stats days=7"))
+	got := lastSend(c)
+	if !strings.Contains(got, "window: last 7 days") {
+		t.Fatalf("window line missing: %q", got)
+	}
+	if !strings.Contains(got, "runs 41") {
+		t.Fatalf("windowed runs wrong (want 41 in fresh window): %q", got)
+	}
+	d.Process(t.Context(), feed(t, inbox, 9202, "/stats days=banana"))
+	got2 := lastSend(c)
+	if !strings.Contains(got2, "days must be 1-3650") {
+		t.Fatalf("bad arg reply = %q", got2)
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -121,6 +122,13 @@ func (d *Dispatcher) Process(ctx context.Context, row InboxRow) {
 	// animation) — the outcome lands as the toast + an edited message.
 	if row.CallbackData != "" {
 		d.claimAndSend(ctx, row, d.callbackText(ctx, row))
+		return
+	}
+
+	// /stats takes an optional window — prefix-match before the exact
+	// case so "/stats days=7" can never be shadowed by bare "/stats".
+	if strings.HasPrefix(row.Text, "/stats ") {
+		d.claimAndSendMD(ctx, row, d.statusTextWindow(ctx, strings.TrimSpace(strings.TrimPrefix(row.Text, "/stats"))))
 		return
 	}
 
@@ -365,7 +373,7 @@ func (d *Dispatcher) helpText() string {
 		"`/audit` — own decision trail (conf, latency)\n" +
 		"`/behaviour <path>` — actions, peak hours, bursts\n\n" +
 		"*🛠 Admin (HITL)*\n" +
-		"`/status` — health ringkas\n" +
+		"`/status` — health ringkas · `/stats days=N` — window N hari\n" +
 		"`/health` — self-audit: errors & confidence per source\n" +
 		"`/approvals` · `/approve <id>` · `/deny <id>`\n" +
 		"`/reload_rules` — hot-reload rules (✅/🚫)\n" +
@@ -401,10 +409,20 @@ type healther interface {
 
 var _ healther = (*store.Store)(nil)
 
+func pluralDay(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
 // statser is the stats slice /status needs (the store already
 // implements it — stats.Snapshot via store.Stats).
 type statser interface {
 	Stats(ctx context.Context) (*store.StatsSnapshot, error)
+	// StatsWindow narrows audit/corpus aggregates to the last N days
+	// (0 = all-time) — the /stats days=N argument.
+	StatsWindow(ctx context.Context, days int) (*store.StatsSnapshot, error)
 }
 
 var _ statser = (*store.Store)(nil)
@@ -464,6 +482,25 @@ func seconds(f float64) time.Duration {
 // statusText renders /status: uptime + one-glance health from the stats
 // snapshot (P4 item). Plain lines, no tables — Telegram-friendly.
 func (d *Dispatcher) statusText(ctx context.Context) string {
+	return d.statusTextWindow(ctx, "")
+}
+
+// statusTextWindow renders /status with an optional "days=N" argument:
+// the window narrows the audit/corpus aggregates (last N days) while
+// uptime, build, and rules stay global — current state, not history.
+func (d *Dispatcher) statusTextWindow(ctx context.Context, arg string) string {
+	days := 0
+	if arg != "" {
+		v, ok := strings.CutPrefix(arg, "days=")
+		if !ok {
+			return "usage: /stats [days=N]"
+		}
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 3650 {
+			return "days must be 1-3650"
+		}
+		days = n
+	}
 	up := time.Since(d.startedAt).Round(time.Second)
 	var b strings.Builder
 	fmt.Fprintf(&b, "🩺 AegisGo status\nuptime %s\n", up)
@@ -472,10 +509,19 @@ func (d *Dispatcher) statusText(ctx context.Context) string {
 		b.WriteString("stats unavailable")
 		return b.String()
 	}
-	snap, err := d.stats.Stats(ctx)
+	var snap *store.StatsSnapshot
+	var err error
+	if days > 0 {
+		snap, err = d.stats.StatsWindow(ctx, days)
+	} else {
+		snap, err = d.stats.Stats(ctx)
+	}
 	if err != nil {
 		b.WriteString("stats error: " + err.Error())
 		return b.String()
+	}
+	if days > 0 {
+		fmt.Fprintf(&b, "window: last %d day%s\n", days, pluralDay(days))
 	}
 	fmt.Fprintf(&b, "runs %d · deflection %.1f%%\n", snap.TotalRuns, snap.DeflectionRate*100)
 	if len(snap.BySource) > 0 {

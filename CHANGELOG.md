@@ -1,3 +1,9 @@
+## 2026-09-29 — merge #53 feat/stats-window
+- store: StatsWindow(days) — audit + fallback-corpus aggregates windowed by ts (RFC3339Nano TEXT vs datetime('now','-N days')); rules stay global (current state); StatsSnapshot.window_days
+- REST: GET /v1/stats?days=N (1-3650, default all-time); ctl: `aegis ctl stats days=N`
+- Telegram: `/stats days=N` prefix arm (exact-case can't shadow args); morning digest now windows runs/deflection to last 24h ("runs (24h)") — cumulative totals hid "what happened since yesterday"
+- why: all-time totals read as static vanity numbers once the trail grows; windows make /stats answer real ops questions (is deflection holding THIS week)
+
 ## 2026-09-28 — merge #50 feat/health-command
 
 - `/health` (Telegram): the agent audits its own answer quality — error share, avg confidence, avg latency per decision source, plus an unknown-source catch-all. Backed by `store.Health()` (outcome-aware GROUP BY over audit_events; confidence averages include pre-#44 rows as 0 — an honest signal of the unscored trail, documented in-code). Wired via the narrow-interface pattern of record (healther + SetHealth, honest degrade when unwired). Help + README synced.

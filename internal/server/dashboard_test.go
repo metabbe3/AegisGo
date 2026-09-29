@@ -16,11 +16,18 @@ import (
 type fakeDashStats struct{}
 
 func (fakeDashStats) Stats(ctx context.Context) (*store.StatsSnapshot, error) {
+	return fakeDashStats{}.StatsWindow(ctx, 0)
+}
+
+// StatsWindow is what the API handler actually calls; the window-aware
+// fake ignores the window and pins the same all-time snapshot.
+func (fakeDashStats) StatsWindow(ctx context.Context, days int) (*store.StatsSnapshot, error) {
 	return &store.StatsSnapshot{
 		TotalRuns:      42,
 		DeflectionRate: 0.5,
 		BySource:       map[string]int{"regex_router": 21, "llm_disabled": 21},
 		RulesByState:   map[string]int{"seed": 6, "mined": 3},
+		WindowDays:     days,
 	}, nil
 }
 

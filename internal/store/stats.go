@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"fmt"
 )
 
 // StatsSnapshot is the observability surface shared by GET /v1/stats and
@@ -16,6 +17,9 @@ type StatsSnapshot struct {
 	AvgLatencyMS   map[string]int64 `json:"avg_latency_ms_by_source"`
 	RulesByState   map[string]int   `json:"rules_by_state"`
 	TopFallbacks   []ShapeCount     `json:"top_fallback_shapes"`
+	// WindowDays is the audit/corpus window this snapshot covers: 0 =
+	// all-time, N = last N days (rules stay global — current state).
+	WindowDays int `json:"window_days"`
 }
 
 // ShapeCount is one fallback shape and its frequency (mining preview).
@@ -24,11 +28,12 @@ type ShapeCount struct {
 	Count int    `json:"count"`
 }
 
-// fallbackShapeSQL is the fallback-corpus grouping stats and the miner
-// share: stats previews the top shapes, the miner clusters them for rule
-// proposals — same GROUP BY, different trailing filter (FallbackShapes
-// owns the assembly).
-const fallbackShapeSQL = `SELECT normalized_prompt, COUNT(*) c FROM fallback_events GROUP BY normalized_prompt`
+// fallbackShapeBase is the unfiltered fallback-corpus grouping stats and
+// the miner share: stats previews the top shapes, the miner clusters them
+// for rule proposals — same GROUP BY, different trailing filter
+// (FallbackShapes owns the assembly). Callers append optional WHERE,
+// GROUP BY, HAVING, ORDER in that SQL order.
+const fallbackShapeBase = `SELECT normalized_prompt, COUNT(*) c FROM fallback_events`
 
 // groupCount is one GROUP BY row: a label and its count.
 type groupCount struct {
@@ -42,8 +47,14 @@ type groupCount struct {
 // miner's clustering. A GROUP BY count is never below 1, so minCount=1 is
 // the unfiltered case.
 func (s *Store) FallbackShapes(ctx context.Context, minCount, limit int) ([]ShapeCount, error) {
-	q := fallbackShapeSQL + ` HAVING c >= ? ORDER BY c DESC`
-	args := []any{minCount}
+	return s.fallbackShapes(ctx, "", nil, minCount, limit)
+}
+
+// fallbackShapes is FallbackShapes with an optional WHERE clause (the
+// stats window filter) — same GROUP BY, args spliced after the clause.
+func (s *Store) fallbackShapes(ctx context.Context, where string, whereArgs []any, minCount, limit int) ([]ShapeCount, error) {
+	q := fallbackShapeBase + where + ` GROUP BY normalized_prompt HAVING c >= ? ORDER BY c DESC`
+	args := append(append([]any{}, whereArgs...), minCount)
 	if limit > 0 {
 		q += ` LIMIT ?`
 		args = append(args, limit)
@@ -71,15 +82,34 @@ func (s *Store) counts(ctx context.Context, query string, args ...any) (map[stri
 	return out, nil
 }
 
-// Stats computes the snapshot with canned SELECTs over the audit trail,
-// rules table, and fallback corpus.
+// Stats computes the all-time snapshot (the pre-window behavior).
 func (s *Store) Stats(ctx context.Context) (*StatsSnapshot, error) {
+	return s.StatsWindow(ctx, 0)
+}
+
+// StatsWindow computes the snapshot over the last N days of audit trail
+// and fallback corpus (0 = all-time, the original behavior). Rules-by-
+// state stays global: the rules table is current state, not history.
+// The ts columns are RFC3339Nano UTC TEXT, which compares correctly
+// against SQLite's datetime('now', ?) ISO strings (same T-separated
+// shape, byte-wise prefix ordering).
+func (s *Store) StatsWindow(ctx context.Context, days int) (*StatsSnapshot, error) {
 	out := &StatsSnapshot{
 		BySource:     map[string]int{},
 		AvgLatencyMS: map[string]int64{},
+		WindowDays:   days,
+	}
+	auditWhere := ""
+	fbWhere := ""
+	var auditArgs, fbArgs []any
+	if days > 0 {
+		auditWhere = ` WHERE ts >= datetime('now', ?)`
+		fbWhere = auditWhere
+		auditArgs = append(auditArgs, fmt.Sprintf("-%d days", days))
+		fbArgs = append(fbArgs, fmt.Sprintf("-%d days", days))
 	}
 
-	if err := s.QueryRow(ctx, `SELECT COUNT(*) FROM audit_events`).Scan(&out.TotalRuns); err != nil {
+	if err := s.QueryRow(ctx, `SELECT COUNT(*) FROM audit_events`+auditWhere, auditArgs...).Scan(&out.TotalRuns); err != nil {
 		return nil, err
 	}
 	type srcAgg struct {
@@ -88,11 +118,11 @@ func (s *Store) Stats(ctx context.Context) (*StatsSnapshot, error) {
 		avg float64
 	}
 	srcRows, err := QueryAll(ctx, s,
-		`SELECT decision_source, COUNT(*), AVG(latency_ms) FROM audit_events GROUP BY decision_source`,
+		`SELECT decision_source, COUNT(*), AVG(latency_ms) FROM audit_events`+auditWhere+` GROUP BY decision_source`,
 		func(r *sql.Rows) (srcAgg, error) {
 			var v srcAgg
 			return v, r.Scan(&v.src, &v.n, &v.avg)
-		})
+		}, auditArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +135,7 @@ func (s *Store) Stats(ctx context.Context) (*StatsSnapshot, error) {
 		out.DeflectionRate = float64(out.BySource[SourceRouter]) / float64(out.TotalRuns)
 	}
 
-	out.ByInterface, err = s.counts(ctx, `SELECT interface, COUNT(*) FROM audit_events GROUP BY interface`)
+	out.ByInterface, err = s.counts(ctx, `SELECT interface, COUNT(*) FROM audit_events`+auditWhere+` GROUP BY interface`, auditArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +144,7 @@ func (s *Store) Stats(ctx context.Context) (*StatsSnapshot, error) {
 		return nil, err
 	}
 
-	out.TopFallbacks, err = s.FallbackShapes(ctx, 1, 10)
+	out.TopFallbacks, err = s.fallbackShapes(ctx, fbWhere, fbArgs, 1, 10)
 	if err != nil {
 		return nil, err
 	}
