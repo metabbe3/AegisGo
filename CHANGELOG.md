@@ -40,6 +40,10 @@
 
 # Changelog
 
+## 2026-09-30 — merge #55 feat/dashboard-health
+
+- Dashboard (GET /) self-audit card: total runs + error share headline, avg confidence per decision source below — the page-level mirror of /v1/health (#54). Card omitted when Health unwired/errors/zero-runs: the dashboard stays a liveness surface first, no misleading "0 runs · 0% err" on fresh installs.
+
 ## 2026-09-30 — merge #54 feat/rest-health
 
 - `GET /v1/health`: REST mirror of the Telegram /health self-audit (merge #50) — error share, avg confidence, avg latency per decision source, in the standard envelope. Nil-wired = 503 like other optional routes; serve wires a.Store. Same contract as chat so scripts/dashboards don't need Telegram.
