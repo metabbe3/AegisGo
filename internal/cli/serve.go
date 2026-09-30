@@ -117,7 +117,7 @@ func serve(ctx context.Context, tierFlag string) error {
 			Jobs:      a.Jobs,        // GET /v1/jobs: live download-job snapshots
 			Events:    pub,           // GET /v1/events: SSE live run feed
 			Dashboard: &server.DashboardDeps{ // mini status page at GET /
-				Stats: a.Store, StartedAt: time.Now(), Commit: version.Commit,
+				Stats: a.Store, Health: a.Store, StartedAt: time.Now(), Commit: version.Commit,
 			},
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
