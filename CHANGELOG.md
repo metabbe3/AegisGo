@@ -40,6 +40,11 @@
 
 # Changelog
 
+## 2026-09-30 — merge #54 feat/rest-health
+
+- `GET /v1/health`: REST mirror of the Telegram /health self-audit (merge #50) — error share, avg confidence, avg latency per decision source, in the standard envelope. Nil-wired = 503 like other optional routes; serve wires a.Store. Same contract as chat so scripts/dashboards don't need Telegram.
+- Deploy note: repo binary now built WITH ldflags commit (footer "build dev" era ends) — aegisgo_start.py restart verified live.
+
 ## Added
 - **2026-09-23 — Optional bearer auth on /v1/\* (AEGIS_HTTP_TOKEN)**: constant-time Bearer gate for the whole API surface; empty = open (LAN default). /healthz /readyz and the dashboard stay credential-free so uptime checks never break. Enables safe exposure beyond localhost.
 - **2026-09-23 — /stats Telegram alias**: `/stats` now renders the same one-glance health payload as `/status` (runs, deflection, per-source split, rules, build) — one code path, zero duplication.
