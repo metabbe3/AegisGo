@@ -38,6 +38,12 @@ type StatsSource interface {
 	StatsWindow(ctx context.Context, days int) (*store.StatsSnapshot, error)
 }
 
+// HealthSource is the self-audit surface: outcome quality per decision
+// source (error share, confidence, latency), not just run counts.
+type HealthSource interface {
+	Health(ctx context.Context) (*store.HealthSnapshot, error)
+}
+
 // AnswerStore is the async answer store the API polls.
 type AnswerStore interface {
 	PutAnswer(ctx context.Context, traceID string) error
@@ -73,6 +79,9 @@ type Deps struct {
 	Answers   AnswerStore
 	Readiness Readiness // optional; nil skips the deep check
 	Stats     StatsSource
+	// Health backs GET /v1/health (self-audit per decision source);
+	// nil = 503, consistent with other unwired optional routes.
+	Health HealthSource
 	// Webhook, when non-nil, is mounted at POST /telegram/webhook (the
 	// handler itself is built by internal/telegram; the server stays
 	// transport-agnostic).
@@ -178,6 +187,9 @@ func Handler(d Deps) http.Handler {
 
 	v1.HandleFunc("GET /v1/stats", func(w http.ResponseWriter, r *http.Request) {
 		statsHandler(w, r, d)
+	})
+	v1.HandleFunc("GET /v1/health", func(w http.ResponseWriter, r *http.Request) {
+		healthHandler(w, r, d)
 	})
 
 	v1.HandleFunc("GET /v1/jobs", func(w http.ResponseWriter, r *http.Request) {
@@ -407,6 +419,23 @@ func statsHandler(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 	writeOK(w, http.StatusOK, s)
+}
+
+// healthHandler is GET /v1/health — the REST mirror of the Telegram
+// /health self-audit: error share, avg confidence and latency per
+// decision source. Same contract as the chat surface (merge #50) so
+// dashboards and scripts can consume it without Telegram.
+func healthHandler(w http.ResponseWriter, r *http.Request, d Deps) {
+	if d.Health == nil {
+		writeErr(w, http.StatusNotImplemented, "health unavailable")
+		return
+	}
+	h, err := d.Health.Health(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeOK(w, http.StatusOK, h)
 }
 
 // getAnswer polls an async run: pending | done | error | 404.

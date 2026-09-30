@@ -104,7 +104,11 @@ func serve(ctx context.Context, tierFlag string) error {
 	srv := &http.Server{
 		Addr: cfg.Addr,
 		Handler: server.Handler(server.Deps{
-			Engine: a.Engine, Answers: a.Store, Readiness: a.Store, Stats: a.Store,
+			Engine:    a.Engine,
+			Answers:   a.Store,
+			Readiness: a.Store,
+			Stats:     a.Store, // GET /v1/stats
+			Health:    a.Store, // GET /v1/health: self-audit REST mirror
 			Webhook:   a.Webhook, // nil unless Telegram runs in webhook mode
 			Approvals: a.Store,   // HITL REST (ADR-0008)
 			Tasks:     tasks,
