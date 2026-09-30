@@ -13,6 +13,9 @@ type DashboardDeps struct {
 	// Stats computes the snapshot; nil renders a stub page (still 200 —
 	// the dashboard is a liveness surface, not a dependency).
 	Stats StatsSource
+	// Health computes the self-audit rollup (error share, confidence per
+	// source) for the quality card; nil or error just omits the card.
+	Health HealthSource
 	// StartedAt anchors the uptime line (zero = omitted).
 	StartedAt time.Time
 	// Commit is the build identity shown in the footer.
@@ -64,6 +67,23 @@ h1{font-size:1.1rem} .card{border:1px solid #ddd;border-radius:8px;padding:.8rem
 					}
 					b.WriteString(`<div class="card">` + rows.String() + `</div>` + "\n")
 				}
+			}
+		}
+		// Self-audit card: quality, not just counts — error share and
+		// avg confidence per source (the dashboard mirror of /v1/health).
+		// Omitted entirely when Health is unwired or errors: the page is
+		// a liveness surface first.
+		if d.Health != nil {
+			if h, err := d.Health.Health(r.Context()); err == nil && h != nil && h.TotalRuns > 0 {
+				fmt.Fprintf(&b, `<div class="card"><div class="kv"><span>self-audit</span><b>%d runs · %.0f%% err</b></div>`,
+					h.TotalRuns, float64(h.Errors)/float64(h.TotalRuns)*100)
+				var rows strings.Builder
+				for _, src := range []string{"regex_router", "llm_classifier", "llm", "llm_disabled", "error"} {
+					if s, ok := h.BySource[src]; ok {
+						fmt.Fprintf(&rows, `<div class="kv"><span>%s conf</span><b>%.0f</b></div>`, src, s.AvgConf)
+					}
+				}
+				b.WriteString(rows.String() + `</div>` + "\n")
 			}
 		}
 		// Live feed card: hidden until the first event arrives, so the page
