@@ -73,3 +73,48 @@ func TestAnalyzeCapsLines(t *testing.T) {
 		t.Fatalf("lines read = %d, want capped 100", a.LinesRead)
 	}
 }
+
+// TestAnalyzeTailWindowBounded pins Hard Rule 10 on /analyze: a log larger
+// than the 8 MiB window is READ as a tail window, never slurped — Analyze
+// must not allocate proportional to the file size. (Pre-fix Analyze did
+// os.ReadFile on the whole file.)
+func TestAnalyzeTailWindowBounded(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "huge.log")
+	// 9 MiB of lines; each line ~64 bytes → ~147k lines.
+	var body []byte
+	line := strings.Repeat("x", 63) + "\n"
+	for bodyLen := 0; bodyLen < 9<<20; {
+		body = append(body, line...)
+		bodyLen += len(line)
+	}
+	if err := os.WriteFile(p, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a, err := Analyze(p, 5000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.LinesRead != 5000 {
+		t.Fatalf("lines read = %d, want windowed 5000", a.LinesRead)
+	}
+}
+
+// TestAnalyzeRejectsNonRegularFile pins the defense-in-depth guard: a
+// device file (e.g. /dev/zero renamed) must be refused — pre-fix a
+// non-regular file fed size-based allocation unbounded.
+func TestAnalyzeRejectsNonRegularFile(t *testing.T) {
+	if _, err := Analyze("/dev/null", 10); err == nil {
+		t.Fatal("non-regular file should error")
+	}
+}
+
+// TestTailFileRejectsNonRegular pins the tailFile defense-in-depth: a
+// device file (block/char special) must yield zero lines even if a legacy
+// stored watch points at it — the poll loop can never spin on /dev/zero.
+func TestTailFileRejectsNonRegular(t *testing.T) {
+	lines, _, _ := tailFile("/dev/zero", 0, 0)
+	if len(lines) != 0 {
+		t.Fatalf("device file yielded %d lines", len(lines))
+	}
+}

@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -22,6 +23,28 @@ type WatchGate struct {
 	Mgr    *logwatch.Manager
 	Store  *logwatch.StoreAdapter
 	Notify func(text string) // owner-chat notifier; nil = alerts logged only
+}
+
+// checkWatchPath guards the watchdog's read surface. Unlike file tools,
+// watches legitimately target logs OUTSIDE the workspace (/tmp/app.log),
+// so full resolvePath containment would break the feature. Instead:
+// kernel pseudo-filesystems (/dev /proc /sys) are rejected outright
+// (block/char devices and synthetic files are not logs), and the target
+// must carry a log-ish extension — a cheap allowlist that stops
+// accidental watches on binaries, sockets, or dotfiles while keeping
+// every real log path (/var/log, /tmp, project dirs) working.
+func checkWatchPath(p string) error {
+	for _, bad := range []string{"/dev/", "/proc/", "/sys/"} {
+		if strings.HasPrefix(p, bad) || p == strings.TrimSuffix(bad, "/") {
+			return fmt.Errorf("path %q is a kernel pseudo-filesystem, not a log file", p)
+		}
+	}
+	ext := strings.ToLower(filepath.Ext(p))
+	switch ext {
+	case ".log", ".txt", ".out", ".err", ".ndjson", ".json":
+		return nil
+	}
+	return fmt.Errorf("path %q must end in .log/.txt/.out/.err/.ndjson/.json", p)
 }
 
 // ParseWatch parses: /watch name=X | path=/a/b.log | pattern=panic|FATAL | every=30s | cooldown=10m
@@ -77,6 +100,9 @@ func ParseWatch(text string) (logwatch.StoredWatch, error) {
 	}
 	if w.Name == "" || w.Path == "" || w.Pattern == "" {
 		return w, fmt.Errorf("name, path, and pattern are required")
+	}
+	if err := checkWatchPath(w.Path); err != nil {
+		return w, err
 	}
 	if !regexp.MustCompile(`^[a-z][a-z0-9_-]{1,40}$`).MatchString(w.Name) {
 		return w, fmt.Errorf("name %q must be lowercase letters/digits/_/-", w.Name)
@@ -186,6 +212,11 @@ func (g *WatchGate) HandleWatchText(ctx context.Context, text string) string {
 		}
 		if path == "" {
 			return "usage: /analyze <path> [-n 500]"
+		}
+		// Same parse-time guard as /watch: kernel pseudo-filesystems and
+		// non-log extensions are refused before any file is opened.
+		if err := checkWatchPath(path); err != nil {
+			return "⚠️ " + err.Error()
 		}
 		a, err := logwatch.Analyze(path, lines)
 		if err != nil {
