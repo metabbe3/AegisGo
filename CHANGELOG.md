@@ -1,3 +1,8 @@
+## 2026-10-01 — merge #52 feat/watch-containment
+
+- Hard Rule 2+10 debt closed on the logwatch family: `/watch` and `/analyze` now refuse kernel pseudo-filesystems (/dev /proc /sys) and non-log extensions at parse time; `tailFile` and `Analyze` refuse non-regular files as defense-in-depth (a legacy stored watch pointing at /dev/zero can never feed size-based allocation); `Analyze` reads an 8 MiB tail window instead of slurping whole files.
+- Also fixes the serve.go gofmt debt from #54/#55 (gofmt -l clean again).
+
 ## 2026-09-29 — merge #53 feat/stats-window
 - store: StatsWindow(days) — audit + fallback-corpus aggregates windowed by ts (RFC3339Nano TEXT vs datetime('now','-N days')); rules stay global (current state); StatsSnapshot.window_days
 - REST: GET /v1/stats?days=N (1-3650, default all-time); ctl: `aegis ctl stats days=N`
