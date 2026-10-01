@@ -70,7 +70,7 @@ func TestParseWatchRejects(t *testing.T) {
 }
 
 func TestParseWatchBareNumberSeconds(t *testing.T) {
-	w, err := ParseWatch(`/watch name=nn | path=/x | pattern=p | every=45`)
+	w, err := ParseWatch(`/watch name=nn | path=/x.log | pattern=p | every=45`)
 	if err != nil {
 		t.Fatal(err)
 	}

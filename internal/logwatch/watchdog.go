@@ -13,6 +13,7 @@ package logwatch
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 	"sort"
@@ -156,6 +157,13 @@ func tailFile(path string, lastSize, lastOff int64) (lines []string, size, off i
 	if err != nil {
 		return nil, lastSize, lastOff
 	}
+	// Defense in depth against the parse-time extension allowlist: a
+	// non-regular file (renamed device, pipe, socket) must not reach the
+	// size-based buffer allocation below — /dev/zero renamed to x.log
+	// would otherwise read forever and blow RAM.
+	if !fi.Mode().IsRegular() {
+		return nil, lastSize, lastOff
+	}
 	size = fi.Size()
 	if size < lastOff || size < lastSize {
 		lastOff = 0 // rotated/truncated: read from head
@@ -273,7 +281,10 @@ func normalize(s string) string {
 }
 
 // Analyze reads the last `lines` lines of path (default 500, capped 5000)
-// and reports pattern statistics. Deterministic, read-only, bounded.
+// and reports pattern statistics. Deterministic, read-only, bounded: the
+// read is a tail window (8 MiB max, Hard Rule 10 — never slurp a GB log)
+// and non-regular files (devices, pipes, sockets renamed to *.log) are
+// refused outright so /dev/zero can never feed the line splitter.
 func Analyze(path string, lines int) (*Analysis, error) {
 	if lines <= 0 {
 		lines = 500
@@ -281,11 +292,28 @@ func Analyze(path string, lines int) (*Analysis, error) {
 	if lines > 5000 {
 		lines = 5000
 	}
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	all := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file", path)
+	}
+	const maxWindow = 8 << 20 // 8 MiB tail window is plenty for 5000 lines
+	off := int64(0)
+	if fi.Size() > maxWindow {
+		off = fi.Size() - maxWindow
+	}
+	buf := make([]byte, fi.Size()-off)
+	if _, err := f.ReadAt(buf, off); err != nil && err != io.EOF {
+		return nil, err
+	}
+	all := strings.Split(strings.TrimRight(string(buf), "\n"), "\n")
 	if len(all) > lines {
 		all = all[len(all)-lines:]
 	}

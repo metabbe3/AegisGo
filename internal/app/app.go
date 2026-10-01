@@ -344,7 +344,6 @@ func startTelegram(ctx context.Context, cfg config.Config, eng *engine.Engine,
 		}
 		return t.Execute(ctx, raw)
 	}
-	_ = execTool
 
 	wgate := &WatchGate{
 		Mgr:   watchMgr,
