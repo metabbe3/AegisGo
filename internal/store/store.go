@@ -333,6 +333,11 @@ func (s *Store) migrate() error {
 			return err
 		}
 	}
+	if version < 8 {
+		if err := s.migrateV8(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

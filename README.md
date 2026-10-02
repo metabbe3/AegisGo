@@ -232,7 +232,7 @@ see WORKFLOW.md.
 - `/uptime` `/disk` `/memory` `/hostname` `/kernel` `/who`
 
 **📅 Scheduler**
-- `/every 30m /disk` · `/scheduled` · `/unschedule #1`
+- `/every 30m /disk` · `/scheduled` · `/unschedule #1` — durable: schedules survive restarts and deploys (SQLite v8)
 
 **📄 Data**
 - `/csv_summary <path>` · `/csv_head <path> [rows]` · `/rules`
