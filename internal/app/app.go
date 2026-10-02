@@ -321,6 +321,11 @@ func startTelegram(ctx context.Context, cfg config.Config, eng *engine.Engine,
 	dispatcher.SetHistory(st)
 	dispatcher.SetHealth(st)
 
+	// Durable schedules (v8): rehydrate persisted /every jobs at boot and
+	// persist new ones — nightly deploys no longer silently wipe them.
+	// The dispatcher owns its scheduler; Start launches rehydrated jobs.
+	dispatcher.StartSchedules(tgCtx, st)
+
 	// 24/7 log watchdog (owner 28 Sep): watches live in SQLite, goroutine
 	// per watch, alerts → owner chat, add/remove from chat without rebuild.
 	watchMgr := logwatch.NewManager(16)

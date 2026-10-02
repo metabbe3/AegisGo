@@ -134,7 +134,7 @@ func (d *Dispatcher) Process(ctx context.Context, row InboxRow) {
 
 	// /every takes arguments — prefix-match before the exact switch.
 	if strings.HasPrefix(row.Text, "/every ") {
-		d.claimAndSend(ctx, row, d.sched.Register(row.ChatID, row.Text))
+		d.claimAndSend(ctx, row, d.sched.Register(ctx, row.ChatID, row.Text))
 		return
 	}
 
@@ -174,7 +174,7 @@ func (d *Dispatcher) Process(ctx context.Context, row InboxRow) {
 		d.claimAndSend(ctx, row, d.sched.List())
 		return
 	case "/unschedule":
-		d.claimAndSend(ctx, row, d.sched.Unregister(row.Text))
+		d.claimAndSend(ctx, row, d.sched.Unregister(ctx, row.Text))
 		return
 	case "/api_perf", "/exceptions", "/access", "/audit", "/behaviour":
 		if d.logAnalysis == nil {

@@ -47,7 +47,7 @@ func TestSchedulerRegisterListUnregister(t *testing.T) {
 	s := NewScheduler(fakeEngine{answer: "ok"}, c, []int64{1},
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 
-	out := s.Register(1, "/every 30m /disk")
+	out := s.Register(context.Background(), 1, "/every 30m /disk")
 	if !strings.Contains(out, "#1") {
 		t.Fatalf("register reply = %q", out)
 	}
@@ -55,7 +55,7 @@ func TestSchedulerRegisterListUnregister(t *testing.T) {
 	if !strings.Contains(lst, "/disk") || !strings.Contains(lst, "#1") {
 		t.Fatalf("list = %q", lst)
 	}
-	out = s.Unregister("/unschedule #1")
+	out = s.Unregister(context.Background(), "/unschedule #1")
 	if !strings.Contains(out, "unscheduled #1") {
 		t.Fatalf("unregister reply = %q", out)
 	}
@@ -70,7 +70,7 @@ func TestSchedulerFiresAndSends(t *testing.T) {
 	c := &fakeClient{}
 	s := NewScheduler(fakeEngine{answer: "disk fine"}, c, []int64{42},
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
-	s.Register(42, "/every 1m /disk")
+	s.Register(context.Background(), 42, "/every 1m /disk")
 	s.mu.Lock()
 	for _, j := range s.jobs {
 		j.nextRun = time.Now().Add(-time.Second) // force due now
@@ -93,14 +93,14 @@ func TestSchedulerFiresAndSends(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	_ = ctx
 	_ = cancel
-	s.Unregister("/unschedule #1")
+	s.Unregister(context.Background(), "/unschedule #1")
 }
 
 // TestSchedulerRejectsForeignChat: a non-allowlisted chat cannot schedule.
 func TestSchedulerRejectsForeignChat(t *testing.T) {
 	s := NewScheduler(fakeEngine{}, &fakeClient{}, []int64{1},
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
-	if out := s.Register(99, "/every 5m /uptime"); !strings.Contains(out, "allowlisted") {
+	if out := s.Register(context.Background(), 99, "/every 5m /uptime"); !strings.Contains(out, "allowlisted") {
 		t.Fatalf("foreign chat reply = %q", out)
 	}
 }
