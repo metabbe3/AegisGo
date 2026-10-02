@@ -1,3 +1,10 @@
+## [2026-10-02] — merge #56 feat/sched-persist
+
+- Durable schedules (SQLite v8): `/every` jobs now persist in `scheduled_jobs` and rehydrate at boot — restarts and nightly deploys no longer silently wipe them. Found two bugs in one audit: schedules were memory-only AND `Scheduler.Start()` was never called anywhere, so the feature degraded on every restart.
+- Restart semantics: next run = now + interval (never a catch-up burst); rows whose chat fell off the allowlist or sit below the minute floor stay in the DB but don't launch — the allowlist remains the boundary.
+- Register/Unregister are store-backed (honest failure replies on storage errors); `/scheduled` lists live jobs.
+- Gates: vet, 25/25 pkgs, make check, coverage 90.0%.
+
 ## 2026-10-01 — merge #52 feat/watch-containment
 
 - Hard Rule 2+10 debt closed on the logwatch family: `/watch` and `/analyze` now refuse kernel pseudo-filesystems (/dev /proc /sys) and non-log extensions at parse time; `tailFile` and `Analyze` refuse non-regular files as defense-in-depth (a legacy stored watch pointing at /dev/zero can never feed size-based allocation); `Analyze` reads an 8 MiB tail window instead of slurping whole files.
