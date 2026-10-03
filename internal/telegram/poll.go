@@ -57,6 +57,12 @@ func (p *PollLoop) Run(ctx context.Context) {
 		}
 		high, err := p.inbox.HighWater(ctx)
 		if err != nil {
+			if logx.QuietCancel(err) {
+				// Shutdown raced the cursor read — the loop's next
+				// iteration exits via ctx.Err(); not a fault.
+				p.logger.Debug("telegram: high water read canceled", "error", err)
+				return
+			}
 			p.logger.Error("telegram: reading high water", "error", err)
 			if !sleepCtx(ctx, backoff) {
 				return
@@ -96,7 +102,11 @@ func (p *PollLoop) Run(ctx context.Context) {
 		// idle polls would otherwise run every cycle.
 		if len(updates) > 0 {
 			if err := p.advance(ctx, updates); err != nil {
-				p.logger.Error("telegram: advancing high water", "error", err)
+				if logx.QuietCancel(err) {
+					p.logger.Debug("telegram: advancing high water canceled", "error", err)
+				} else {
+					p.logger.Error("telegram: advancing high water", "error", err)
+				}
 			}
 		}
 	}

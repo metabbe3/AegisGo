@@ -2,7 +2,10 @@ package logx
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"log/slog"
 	"strings"
 	"testing"
@@ -58,5 +61,28 @@ func TestOrNilFallsBackToDefault(t *testing.T) {
 	l := slog.Default()
 	if got := Or(l); got != l {
 		t.Error("Or(l) != l for non-nil l")
+	}
+}
+
+// TestQuietCancel: cancellation and deadline (possibly wrapped) are the
+// shutdown signature — true; every other error stays false so real faults
+// keep their ERROR level.
+func TestQuietCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if !QuietCancel(ctx.Err()) {
+		t.Error("context.Canceled not detected")
+	}
+	if !QuietCancel(context.DeadlineExceeded) {
+		t.Error("context.DeadlineExceeded not detected")
+	}
+	if !QuietCancel(fmt.Errorf("poll: %w", context.Canceled)) {
+		t.Error("wrapped context.Canceled not detected")
+	}
+	if QuietCancel(io.ErrUnexpectedEOF) {
+		t.Error("non-cancellation error reported as quiet")
+	}
+	if QuietCancel(nil) {
+		t.Error("nil error reported as quiet")
 	}
 }
