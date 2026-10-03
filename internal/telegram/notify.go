@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"aegisgo/internal/logx"
 )
 
 // Approval notifier (ADR-0006): when the store gains a NEW pending
@@ -98,6 +100,10 @@ func (n *Notifier) Start(ctx context.Context) {
 func (n *Notifier) prime(ctx context.Context) {
 	pend, err := n.src.PendingApprovals(ctx, 50)
 	if err != nil {
+		if logx.QuietCancel(err) {
+			n.logger.Debug("telegram: notifier prime canceled", "error", err)
+			return
+		}
 		n.logger.Error("telegram: notifier prime failed", "error", err)
 		return
 	}
@@ -112,6 +118,12 @@ func (n *Notifier) prime(ctx context.Context) {
 func (n *Notifier) tick(ctx context.Context) {
 	pend, err := n.src.PendingApprovals(ctx, 50)
 	if err != nil {
+		if logx.QuietCancel(err) {
+			// Shutdown racing the poller — expected on every restart,
+			// not a fault (was ERROR: 718 noise lines in one log).
+			n.logger.Debug("telegram: notifier poll canceled", "error", err)
+			return
+		}
 		n.logger.Error("telegram: notifier poll failed", "error", err)
 		return
 	}

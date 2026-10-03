@@ -2,6 +2,7 @@ package telegram
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 	"testing"
 	"time"
@@ -125,3 +126,25 @@ func indexOf(s, sub string) int {
 }
 
 var _ = sync.Mutex{} // keep sync if unused later
+
+// TestNotifierTickCanceledIsQuiet pins the fix: a poll that fails because
+// the process is shutting down logs at DEBUG ("canceled"), never the ERROR
+// "notifier poll failed" — 718 of those noise lines were healthy deploys.
+func TestNotifierTickCanceledIsQuiet(t *testing.T) {
+	st := newNotifierStore(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // simulate shutdown racing the tick
+	c := &fakeClient{}
+	h := &recHandler{}
+	n := NewNotifier(&approvalShim{st: st}, c, []int64{chatOK}, time.Millisecond, slog.New(h))
+	n.tick(ctx)
+	if h.saw("telegram: notifier poll failed") {
+		t.Error("canceled tick still logged ERROR 'notifier poll failed'")
+	}
+	if !h.saw("telegram: notifier poll canceled") {
+		t.Error("canceled tick did not log the quiet DEBUG line")
+	}
+	if c.sendCount() != 0 {
+		t.Errorf("canceled tick sent %d messages", c.sendCount())
+	}
+}

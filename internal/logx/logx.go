@@ -7,6 +7,8 @@
 package logx
 
 import (
+	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"strings"
@@ -29,6 +31,15 @@ func Or(l *slog.Logger) *slog.Logger {
 		return slog.Default()
 	}
 	return l
+}
+
+// QuietCancel reports whether err is (or wraps) a context cancellation or
+// deadline — the signature of an orderly shutdown, not a fault. Long-lived
+// pollers (telegram notifier, long-poll transport) hit this on every
+// graceful restart; logging it at ERROR turned healthy deploys into pages
+// of red noise (718 lines in one serve.log). Callers demote it to Debug.
+func QuietCancel(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 func parseLevel(level string) slog.Level {

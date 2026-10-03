@@ -1,3 +1,9 @@
+## [2026-10-03] — merge #57 feat/quiet-shutdown
+
+- logx.QuietCancel(err): one shared test for the shutdown signature (context.Canceled/DeadlineExceeded, wrapped included). Telegram notifier tick/prime and long-poll transport (high-water read + advance) now demote cancellation races to DEBUG instead of ERROR.
+- why: 718 "notifier poll failed: context canceled" ERROR lines in one serve.log — every healthy deploy/restart read as a fault (589 on Oct 1 alone). Clean shutdowns are silent; real faults keep ERROR.
+- Gates: vet, 25/25 pkgs, check, coverage 90.0%.
+
 ## [2026-10-02] — merge #56 feat/sched-persist
 
 - Durable schedules (SQLite v8): `/every` jobs now persist in `scheduled_jobs` and rehydrate at boot — restarts and nightly deploys no longer silently wipe them. Found two bugs in one audit: schedules were memory-only AND `Scheduler.Start()` was never called anywhere, so the feature degraded on every restart.
