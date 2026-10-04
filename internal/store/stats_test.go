@@ -223,3 +223,41 @@ func TestStatsWindowStringCompare(t *testing.T) {
 		t.Errorf("TotalRuns = %d, want 1 — RFC3339Nano TEXT no longer compares against datetime('now') ISO strings", snap.TotalRuns)
 	}
 }
+
+// --- health window (merge #58) ---
+
+// TestHealthWindowExcludesOldRows proves HealthWindow(1) only counts the
+// last day while Health keeps the all-time view. It FAILS without the
+// change (Health had no window).
+func TestHealthWindowExcludesOldRows(t *testing.T) {
+	s := openMem(t)
+	ctx := context.Background()
+	old := time.Now().UTC().Add(-72 * time.Hour).Format(time.RFC3339Nano)
+	fresh := time.Now().UTC().Format(time.RFC3339Nano)
+	for i := range []string{old, fresh} {
+		s.Audit(ctx, AuditEvent{
+			TraceID: fmt.Sprintf("hw%d", i), Interface: IFaceCLI,
+			DecisionSource: SourceRouter, RuleID: "uptime", Prompt: "/uptime",
+			Confidence: 90, LatencyMS: 5,
+		})
+	}
+	mustFlush(t, s)
+	for i, ts := range []string{old, fresh} {
+		mustExec(t, s, `UPDATE audit_events SET ts=? WHERE trace_id=?`, ts, fmt.Sprintf("hw%d", i))
+	}
+
+	w, err := s.HealthWindow(ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w.TotalRuns != 1 {
+		t.Errorf("window TotalRuns = %d, want 1 (only the fresh row)", w.TotalRuns)
+	}
+	all, err := s.Health(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if all.TotalRuns != 2 {
+		t.Errorf("all-time TotalRuns = %d, want 2 (regression guard)", all.TotalRuns)
+	}
+}

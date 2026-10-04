@@ -207,6 +207,17 @@ type SourceHealth struct {
 // pre-#44 rows average in as 0 — an honest signal of how much of the trail
 // predates scoring, not a bug to paper over.
 func (s *Store) Health(ctx context.Context) (*HealthSnapshot, error) {
+	return s.health(ctx, 0)
+}
+
+// HealthWindow is Health restricted to the last N days (0 = all time) —
+// the 24h slice the morning digest reports, mirroring StatsWindow: an
+// all-time error share reads as permanent history, not "last night".
+func (s *Store) HealthWindow(ctx context.Context, days int) (*HealthSnapshot, error) {
+	return s.health(ctx, days)
+}
+
+func (s *Store) health(ctx context.Context, days int) (*HealthSnapshot, error) {
 	type row struct {
 		src    string
 		n      int
@@ -214,15 +225,20 @@ func (s *Store) Health(ctx context.Context) (*HealthSnapshot, error) {
 		avgLat float64
 		avgC   float64
 	}
+	where, args := "", []any{}
+	if days > 0 {
+		where = ` WHERE ts >= datetime('now', ?)`
+		args = append(args, fmt.Sprintf("-%d days", days))
+	}
 	rows, err := QueryAll(ctx, s,
 		`SELECT decision_source, COUNT(*),
 			SUM(CASE WHEN outcome='error' THEN 1 ELSE 0 END),
 			AVG(latency_ms), AVG(confidence)
-		 FROM audit_events GROUP BY decision_source`,
+		 FROM audit_events`+where+` GROUP BY decision_source`,
 		func(r *sql.Rows) (row, error) {
 			var v row
 			return v, r.Scan(&v.src, &v.n, &v.errs, &v.avgLat, &v.avgC)
-		})
+		}, args...)
 	if err != nil {
 		return nil, err
 	}
