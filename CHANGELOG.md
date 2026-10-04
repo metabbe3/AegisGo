@@ -1,3 +1,10 @@
+## [2026-10-04] — merge #58 feat/digest-health
+
+- Morning digest health line: `store.HealthWindow(days)` (mirrors StatsWindow's SQL window) + `Digest.SetHealth` — the 07:00 digest now reports last night's error share and router confidence ("🩺 N runs · X% errors · router conf Y") instead of only run counts.
+- why: the digest said answers happened, never whether they were trustworthy; an all-time error share would read as permanent history, so the line is windowed to the same 24h as the runs line. Honest degrade: no health source or zero runs = no line.
+- Also removed dead `scoreForSource` (engine) — zero references; coverage back over the 90% gate (89.9 → 90.0).
+- Gates: vet, 25/25 pkgs, make check, coverage 90.0%.
+
 ## [2026-10-03] — merge #57 feat/quiet-shutdown
 
 - logx.QuietCancel(err): one shared test for the shutdown signature (context.Canceled/DeadlineExceeded, wrapped included). Telegram notifier tick/prime and long-poll transport (high-water read + advance) now demote cancellation races to DEBUG instead of ERROR.

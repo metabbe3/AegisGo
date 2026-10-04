@@ -193,3 +193,9 @@ transport HTTP penuh. Queue malam ini:
 ## 2026-09-29 21:5x — CTO Builder (batch-7)
 - Batch plan: #53 stats-window (M) → DEPLOY checkpoint → #54 REST /v1/health → #55 dashboard health card → #52 watch/analyze tool-boundary containment. #51 hot-rule-import DEFER kalau budget < estimasi.
 - #53: store.StatsWindow + REST ?days= + ctl stats days= + /stats days= prefix arm + digest "runs (24h)". Gate hijau: vet/test/check/cover 90.1%.
+
+## 2026-10-04 20:0x — CTO Builder (batch-8, slot malam)
+- DEBT-FIRST: no deploy debt (live 553976b == main HEAD sebelum mulai). Terima WIP lintas-slot: 3 file modified (stats/digest/dispatcher) = #58 setengah jadi → diselesaikan malam ini (bukan dibiarkan buset).
+- #58 MERGED b1e5860: digest health line (HealthWindow 24h + SetHealth + dead scoreForSource dihapus utk coverage gate). Deploy checkpoint: build b1e5860 → kickstart → healthz ok, GET / commit=b1e5860, /uptime regex_router live.
+- Coverage 89.9 → 90.0 via dead-code removal (scoreForSource 0 referensi). Lesson: gate 89.9 = cari dead code dulu, bukan tambah test vanity.
+- Next picks: #51 /register_rules hot-rule-import (queue lama, M); MCP-HTTP smoke ulang pasca-#56/#57 (restart storm test); WAL checkpoint tuning baru layak kalau corpus > 100 event.
