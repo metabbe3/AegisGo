@@ -407,6 +407,15 @@ type healther interface {
 	Health(ctx context.Context) (*store.HealthSnapshot, error)
 }
 
+// healthWindower is the windowed slice of healther the digest reports
+// (the store already implements it; keep the dispatcher's /health on the
+// plain healther — all-time is the right window for an on-demand audit).
+type healthWindower interface {
+	HealthWindow(ctx context.Context, days int) (*store.HealthSnapshot, error)
+}
+
+var _ healthWindower = (*store.Store)(nil)
+
 var _ healther = (*store.Store)(nil)
 
 func pluralDay(n int) string {

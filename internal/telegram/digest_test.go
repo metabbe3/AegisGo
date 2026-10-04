@@ -69,3 +69,35 @@ func TestDigestDeniedIcon(t *testing.T) {
 		t.Fatalf("want deny icon: %q", sink.texts[0])
 	}
 }
+
+// The digest reports the 24h self-audit line when a health source is
+// wired: error share over last night's runs. FAILS without merge #58
+// (SetHealth/HealthWindow absent — the digest never mentioned 🩺).
+func TestDigestHealthLine(t *testing.T) {
+	st, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	st.Audit(ctx, store.AuditEvent{
+		TraceID: "h1", Interface: store.IFaceCLI, DecisionSource: store.SourceRouter,
+		RuleID: "uptime", Prompt: "/uptime", Outcome: "ok", Confidence: 93,
+	})
+
+	sink := &fakeSink{fakeClient: &fakeClient{}}
+	dg := NewDigest(sink, []int64{42}, st, st, st, nil)
+	dg.SetHealth(st)
+	dg.Send(ctx)
+
+	if len(sink.texts) != 1 {
+		t.Fatalf("digest sends = %d, want 1", len(sink.texts))
+	}
+	got := sink.texts[0]
+	if !strings.Contains(got, "🩺") || !strings.Contains(got, "0% errors") {
+		t.Fatalf("digest missing health line:\n%s", got)
+	}
+	if !strings.Contains(got, "router conf 93") {
+		t.Fatalf("health line missing router confidence:\n%s", got)
+	}
+}

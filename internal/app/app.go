@@ -284,6 +284,7 @@ func startTelegram(ctx context.Context, cfg config.Config, eng *engine.Engine,
 	// Daily digest (ADR-0010): one deterministic morning message per
 	// chat — uptime, runs, pending count, last decisions. No LLM.
 	dig := telegram.NewDigest(client, cfg.TelegramChats, st, st, st, logger)
+	dig.SetHealth(st)
 	go func() {
 		// Align to the next 07:00 local, then every 24h.
 		now := time.Now()

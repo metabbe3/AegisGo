@@ -18,6 +18,7 @@ type Digest struct {
 	stats   statser
 	hist    historian
 	pend    approver
+	health  healthWindower
 	started time.Time
 	logger  *slog.Logger
 }
@@ -32,6 +33,10 @@ func NewDigest(c Client, chatIDs []int64, stats statser, hist historian,
 	return &Digest{client: c, chatIDs: chatIDs, stats: stats, hist: hist,
 		pend: pend, started: time.Now(), logger: logger}
 }
+
+// SetHealth wires the self-audit source for the digest's health line —
+// nil keeps the digest complete without it (honest degrade, ADR-0010).
+func (dg *Digest) SetHealth(h healthWindower) { dg.health = h }
 
 // Send renders and delivers today's digest to every chat.
 func (dg *Digest) Send(ctx context.Context) {
@@ -63,6 +68,21 @@ func (dg *Digest) text(ctx context.Context) string {
 			if avg, ok := snap.AvgLatencyMS["regex_router"]; ok {
 				fmt.Fprintf(&b, "router answers in %dms\n", avg)
 			}
+		}
+	}
+
+	if dg.health != nil {
+		// Same 24h window as the stats line above: error share + avg
+		// confidence per source, so the morning report says whether
+		// answers were TRUSTWORTHY last night, not just that they
+		// happened (the /health rollup, windowed).
+		if h, err := dg.health.HealthWindow(ctx, 1); err == nil && h != nil && h.TotalRuns > 0 {
+			fmt.Fprintf(&b, "🩺 %d runs · %.0f%% errors", h.TotalRuns,
+				100*float64(h.Errors)/float64(h.TotalRuns))
+			if c := h.BySource["regex_router"]; c.Runs > 0 {
+				fmt.Fprintf(&b, " · router conf %.0f", c.AvgConf)
+			}
+			b.WriteString("\n")
 		}
 	}
 

@@ -33,7 +33,6 @@ import (
 	"regexp"
 
 	"aegisgo/internal/router"
-	"aegisgo/internal/store"
 )
 
 // Confidence bands (exported for headers, tests, and any interface that
@@ -114,19 +113,6 @@ func ScoreLLM(answer string, toolsUsed, ruleCount int) Confidence {
 // ScoreNone covers refusals and failures: not answers, zero confidence.
 func ScoreNone(why string) Confidence {
 	return Confidence{Score: 0, Band: "LOW", Why: why}
-}
-
-// scoreForSource rebuilds a confidence for sources whose answer never went
-// through the LLM scoring path (audit replay, tests).
-func scoreForSource(src string) Confidence {
-	switch src {
-	case store.SourceRouter:
-		return ScoreRouter()
-	case store.SourceLLMClassifier:
-		return ScoreClassifier()
-	default:
-		return ScoreNone("no verifiable signal")
-	}
 }
 
 // ruleCountSafe returns the router's rule count without panicking on a nil
