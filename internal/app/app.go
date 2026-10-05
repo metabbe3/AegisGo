@@ -81,6 +81,19 @@ func Build(ctx context.Context, cfg config.Config, tier config.Tier,
 		return nil, nil, err
 	}
 
+	// Reconcile before the first load: rules added to Seeded() by newer
+	// builds must reach DBs created by older builds (prod DBs never
+	// re-seed — the manual INSERT dance for /forecast on 2026-09-28 is
+	// the debt this closes). Shadowed/demoted rows are reported, never
+	// re-enabled (operator decisions win).
+	if ins, shadow, err := router.ReconcileSeeded(ctx, st, nil); err != nil {
+		releaseMCP()
+		st.Close()
+		return nil, nil, fmt.Errorf("reconciling seeded rules: %w", err)
+	} else if len(ins) > 0 || len(shadow) > 0 {
+		logger.Info("seeded rules reconciled",
+			"inserted", len(ins), "shadowed", shadow)
+	}
 	rules, err := router.LoadRules(ctx, st)
 	if err != nil {
 		releaseMCP()
