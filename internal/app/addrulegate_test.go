@@ -47,6 +47,34 @@ func TestParseAddRuleValid(t *testing.T) {
 	}
 }
 
+func TestParseAddRuleRejoinsPipesInPattern(t *testing.T) {
+	// A pattern with regex alternation must survive the pipe separator:
+	// the seeded /disk|/df shape (and the /rules export replay dialect).
+	// This failed with "bad segment" before the re-join pass.
+	spec, err := parseAddRule(`/addrule name=disks | pattern=/disk|/df | tool=read_doc | args={"path":"logs/disk.txt"}`)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if spec.Pattern != `/disk|/df` {
+		t.Fatalf("pattern = %q, want /disk|/df", spec.Pattern)
+	}
+	if spec.Tool != "read_doc" {
+		t.Fatalf("tool = %q", spec.Tool)
+	}
+}
+
+func TestParseAddRuleRejoinsPipeSegmentContainingEquals(t *testing.T) {
+	// The continuation itself contains '=' inside the group: only a
+	// KNOWN-KEY prefix starts a new segment, so metric=(a|b) merges left.
+	spec, err := parseAddRule(`/addrule name=fc | pattern=/fc\s+(\S+) metric=(err_rate|req_rate) | tool=read_doc | args={"path":"logs/x.log"}`)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if spec.Pattern != `/fc\s+(\S+) metric=(err_rate|req_rate)` {
+		t.Fatalf("pattern = %q", spec.Pattern)
+	}
+}
+
 func TestParseAddRuleRejects(t *testing.T) {
 	bad := []string{
 		`/addrule`, // empty

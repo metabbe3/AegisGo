@@ -1,3 +1,9 @@
+## [2026-10-06] — merge #61 feat/addrule-pipe-rejoin
+
+- `/addrule` parsing now re-joins pipe-separated segments: a pattern value containing `|` (regex alternation, e.g. `pattern=/disk|/df`) is no longer rejected as "bad segment". A segment starts a new key=value pair only when it begins with a known key (name/pattern/tool/args) — so a continuation that itself contains `=` (`metric=(err_rate|req_rate)`) merges left, stricter than /watch's no-`=` merge rule.
+- why: ~6 seeded rule patterns contain `|` and the upcoming `/rules export` (#60) replays rules as `/addrule` lines — the dialect could not round-trip its own corpus. Same parser bug class as /watch's pipe-in-value, closed at the source.
+- Gates: vet, 25/25 pkgs, make check, coverage 90.0%.
+
 ## [2026-10-04] — merge #58 feat/digest-health
 
 - Morning digest health line: `store.HealthWindow(days)` (mirrors StatsWindow's SQL window) + `Digest.SetHealth` — the 07:00 digest now reports last night's error share and router confidence ("🩺 N runs · X% errors · router conf Y") instead of only run counts.
@@ -62,8 +68,6 @@
 - `GET /v1/jobs`: live background-job snapshot (running first, then finished newest-first, bounded by retention). Nil-safe: idle server returns `[]` not `null`.
 - `aegis ctl jobs`: CLI client that asks the running server via `AEGIS_ADDR` (default http://localhost:8080); attaches `Authorization: Bearer` when `AEGIS_HTTP_TOKEN` is set.
 - Coverage 90.0% (gate green). Tests: List ordering + adapter, endpoint 503/200, ctl client (table/empty/bearer/down).
-
-# Changelog
 
 ## 2026-09-30 — merge #55 feat/dashboard-health
 

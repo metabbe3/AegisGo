@@ -63,10 +63,27 @@ func parseAddRule(text string) (*ruleSpec, error) {
 		return nil, fmt.Errorf("usage: /addrule name=X | pattern=Y | tool=Z | args={...} — see /help")
 	}
 	spec := &ruleSpec{}
+	// Split on |, then re-join value-internal pipes: a pattern like
+	// /disk|/df must survive the pipe INSIDE the regex. The merge guard is
+	// "starts with a known key" (not watchgate's no-= rule): a pattern
+	// continuation can itself contain '=' (metric=(err_rate|req_rate)),
+	// so only a known-key prefix starts a NEW segment.
+	var segs []string
 	for _, part := range strings.Split(body, "|") {
-		kv := strings.SplitN(strings.TrimSpace(part), "=", 2)
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if len(segs) > 0 && !startsWithKnownKey(part) {
+			segs[len(segs)-1] += "|" + part
+			continue
+		}
+		segs = append(segs, part)
+	}
+	for _, seg := range segs {
+		kv := strings.SplitN(seg, "=", 2)
 		if len(kv) != 2 {
-			return nil, fmt.Errorf("bad segment %q (want key=value)", strings.TrimSpace(part))
+			return nil, fmt.Errorf("bad segment %q (want key=value)", seg)
 		}
 		k, v := strings.ToLower(strings.TrimSpace(kv[0])), strings.TrimSpace(kv[1])
 		switch k {
@@ -113,6 +130,20 @@ func addableTool(t string) bool {
 	switch t {
 	case "read_csv", "csv_stats", "read_doc", "analyze_log":
 		return true
+	}
+	return false
+}
+
+// addruleKeys are the keys a NEW pipe segment may start with; anything
+// else after a | is a value continuation (regex alternation), merged left.
+var addruleKeys = []string{"name", "pattern", "tool", "args"}
+
+// startsWithKnownKey reports whether s begins a new key=value segment.
+func startsWithKnownKey(s string) bool {
+	for _, k := range addruleKeys {
+		if strings.HasPrefix(s, k+"=") {
+			return true
+		}
 	}
 	return false
 }
