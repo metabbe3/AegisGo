@@ -1,3 +1,25 @@
+## [2026-10-07] — merge #60 feat/rules-export
+
+- `/rules export` (Telegram): renders the LIVE rule set as `/addrule` lines —
+  the same dialect chat rules are created in — so a rule config is portable
+  between boxes with zero sqlite surgery. Non-chat-addable tools
+  (system_command & co.) export as an honest reference list (replaying them
+  from chat is impossible by design — allowlist symmetry with AddRuleGate).
+  Plain `/rules` stays the exact-case one-line listing; help text updated.
+  Unwired/empty sets degrade honestly. Depends on #61's pipe re-join for
+  alternation patterns to round-trip.
+- Gates: vet, 25/25 pkgs, make check, coverage 90.0%.
+
+## [2026-10-05] — merge #59 feat/rules-reconcile
+
+- Seeded-rules reconcile at boot: prod DBs never re-seed — rules added to
+  `router.Seeded()` in newer builds silently miss older DBs (the manual
+  /forecast INSERT dance 2026-09-28 was this debt). `ReconcileSeeded`
+  backfills via INSERT OR IGNORE at every boot, reports shadowed/demoted
+  rules, never re-enables operator decisions; wired in app.Build before
+  first LoadRules.
+- Gates: vet, 25/25 pkgs, make check, coverage 90.0%.
+
 ## [2026-10-06] — merge #61 feat/addrule-pipe-rejoin
 
 - `/addrule` parsing now re-joins pipe-separated segments: a pattern value containing `|` (regex alternation, e.g. `pattern=/disk|/df`) is no longer rejected as "bad segment". A segment starts a new key=value pair only when it begins with a known key (name/pattern/tool/args) — so a continuation that itself contains `=` (`metric=(err_rate|req_rate)`) merges left, stricter than /watch's no-`=` merge rule.

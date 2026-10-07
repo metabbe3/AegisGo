@@ -199,3 +199,8 @@ transport HTTP penuh. Queue malam ini:
 - #58 MERGED b1e5860: digest health line (HealthWindow 24h + SetHealth + dead scoreForSource dihapus utk coverage gate). Deploy checkpoint: build b1e5860 → kickstart → healthz ok, GET / commit=b1e5860, /uptime regex_router live.
 - Coverage 89.9 → 90.0 via dead-code removal (scoreForSource 0 referensi). Lesson: gate 89.9 = cari dead code dulu, bukan tambah test vanity.
 - Next picks: #51 /register_rules hot-rule-import (queue lama, M); MCP-HTTP smoke ulang pasca-#56/#57 (restart storm test); WAL checkpoint tuning baru layak kalau corpus > 100 event.
+
+## 2026-10-07 20:1x — CTO Builder (batch-9, slot malam)
+- DEBT-FIRST: no deploy debt (live 5801f0d == HEAD awal slot). Utang nyata = WIP lintas-slot `feat/rules-export` (#60) nyangkut di working tree — commit #61 sudah mereferensikannya — selesai + merged 844b595 malam ini. Changelog utang #59 (reconcile, merged 5 Okt tanpa entry) dibayar + cto-queue #59 → done. Push origin main 4-commit backlog dibayar.
+- BATCH: #60 rules-export (S) → deploy checkpoint → batch kecil item 2-3 (lihat laporan).
+- Export sizing check: 25 live rules ≈ 2.9KB < 4096 limit Telegram — satu pesan cukup.
