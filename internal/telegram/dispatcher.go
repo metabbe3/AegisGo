@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"aegisgo/internal/engine"
+	"aegisgo/internal/router"
 	"aegisgo/internal/store"
 	"aegisgo/internal/trace"
 	"aegisgo/internal/version"
@@ -51,6 +52,8 @@ type Dispatcher struct {
 	stats statser
 	// health backs /health self-audit (nil = command reports unavailable).
 	health healther
+	// rulesExport backs /rules export (nil = command reports unavailable).
+	rulesExport rulesExporter
 	// hist backs /history (nil = command reports unavailable).
 	hist historian
 	// jobs backs /jobs (nil = command reports unavailable).
@@ -129,6 +132,15 @@ func (d *Dispatcher) Process(ctx context.Context, row InboxRow) {
 	// case so "/stats days=7" can never be shadowed by bare "/stats".
 	if strings.HasPrefix(row.Text, "/stats ") {
 		d.claimAndSendMD(ctx, row, d.statusTextWindow(ctx, strings.TrimSpace(strings.TrimPrefix(row.Text, "/stats"))))
+		return
+	}
+
+	// /rules export — prefix arm: exports the live rule set as /addrule
+	// lines (the same dialect chat rules are created in), so a config is
+	// portable between boxes without sqlite surgery. Plain /rules stays
+	// the exact-case listing.
+	if row.Text == "/rules export" {
+		d.claimAndSend(ctx, row, d.rulesExportText())
 		return
 	}
 
@@ -361,7 +373,7 @@ func (d *Dispatcher) helpText() string {
 		"`/every 30m /disk` · `/scheduled` · `/unschedule #1`\n\n" +
 		"*📄 Data*\n" +
 		"`/csv_summary <path>` · `/csv_head <path> [rows]`\n" +
-		"`/rules` — daftar rule aktif\n\n" +
+		"`/rules` — daftar rule aktif · `/rules export` — rule sebagai /addrule (portabel)\n\n" +
 		"*👁 Log watchdog 24/7*\n" +
 		"`/watch name=gw | path=/tmp/gw.log | pattern=panic|FATAL | every=30s`\n" +
 		"`/unwatch <name>` · `/watchlist`\n" +
@@ -392,6 +404,72 @@ func (d *Dispatcher) rulesText() string {
 		return "No rules active."
 	}
 	return "Active rules:\n" + strings.Join(lines, "\n")
+}
+
+// rulesExporter is the richer slice /rules export needs: the full live
+// rule defs (pattern, tool, args template), not just the one-line names.
+// The router satisfies it via RuleDefs(); a narrow interface keeps the
+// dispatcher testable.
+type rulesExporter interface {
+	RuleDefs() []router.RuleDef
+}
+
+// SetRulesExporter wires the live router for /rules export.
+func (d *Dispatcher) SetRulesExporter(r rulesExporter) { d.rulesExport = r }
+
+// chatAddable mirrors AddRuleGate's allowlist (read-only, path-arg tools
+// only — Hard Rule 12 symmetry) so the export only emits lines the replay
+// dialect can actually accept. Kept here as a literal copy with a comment
+// pointing at addrulegate.go: telegram must not import app (import-cycle
+// rule for gated actions).
+func chatAddable(tool string) bool {
+	switch tool {
+	case "read_csv", "csv_stats", "read_doc", "analyze_log":
+		return true
+	}
+	return false
+}
+
+// rulesExportText renders the live rule set as /addrule lines — the same
+// dialect /addrule creates rules in — so an export can be replayed on a
+// fresh box with zero sqlite surgery. Rules whose tool is not chat-addable
+// are exported as an honest reference list (replaying them from chat would
+// be rejected by the allowlist; they ship with the binary's Seeded()).
+// Mined rules are included (they are live behavior); disabled ones are
+// not (RuleDefs is the LIVE set).
+func (d *Dispatcher) rulesExportText() string {
+	if d.rulesExport == nil {
+		return "Rules export unavailable (router not wired)."
+	}
+	defs := d.rulesExport.RuleDefs()
+	if len(defs) == 0 {
+		return "No rules to export."
+	}
+	var replay, ref []string
+	for _, d := range defs {
+		args := strings.TrimSpace(d.ArgsTemplate)
+		if args == "" {
+			args = "{}"
+		}
+		if chatAddable(d.Tool) {
+			replay = append(replay, fmt.Sprintf("/addrule name=%s | pattern=%s | tool=%s | args=%s",
+				d.Name, d.Pattern, d.Tool, args))
+		} else {
+			ref = append(ref, fmt.Sprintf("%s → %s → %s", d.Name, d.Pattern, d.Tool))
+		}
+	}
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("Rules export (%d live, %d replayable as /addrule):\n", len(defs), len(replay)))
+	for _, l := range replay {
+		b.WriteString(l + "\n")
+	}
+	if len(ref) > 0 {
+		b.WriteString("\nShipped with the binary (not chat-addable):\n")
+		for _, l := range ref {
+			b.WriteString(l + "\n")
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // historian is the decisions slice /history needs.
