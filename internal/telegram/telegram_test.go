@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"aegisgo/internal/engine"
+	"aegisgo/internal/router"
 	"aegisgo/internal/store"
 )
 
@@ -397,3 +398,62 @@ var errFake = &fakeError{}
 type fakeError struct{}
 
 func (*fakeError) Error() string { return "fake api error" }
+
+// fakeRulesExporter pins the /rules export contract against a fixed live
+// set spanning both sections: a chat-addable tool (read_doc) and one that
+// only ships with the binary (system_command).
+type fakeRulesExporter struct{ defs []router.RuleDef }
+
+func (f fakeRulesExporter) RuleDefs() []router.RuleDef { return f.defs }
+
+func TestRulesExportCommand(t *testing.T) {
+	c := &fakeClient{}
+	d, inbox := harness(t, fakeEngine{answer: "hi"}, c)
+	d.SetRulesExporter(fakeRulesExporter{defs: []router.RuleDef{
+		{Name: "myhelp", Pattern: `/myhelp(?:\s+(.*))?`, Tool: "read_doc",
+			ArgsTemplate: `{"path":"docs/$1"}`},
+		{Name: "uptime", Pattern: `/uptime`, Tool: "system_command",
+			ArgsTemplate: `{"command":"uptime"}`},
+	}})
+	row := feed(t, inbox, 40, "/rules export")
+	d.Process(context.Background(), row)
+	if len(c.sends) != 1 {
+		t.Fatalf("sends = %d, want 1", len(c.sends))
+	}
+	got := c.sends[0]
+	for _, want := range []string{
+		"Rules export (2 live, 1 replayable as /addrule):",
+		"/addrule name=myhelp | pattern=/myhelp(?:\\s+(.*))? | tool=read_doc | args={\"path\":\"docs/$1\"}",
+		"Shipped with the binary (not chat-addable):",
+		"uptime → /uptime → system_command",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("export missing %q\ngot:\n%s", want, got)
+		}
+	}
+	// The reference section must NOT offer a replay line for the
+	// non-addable tool — replaying it from chat is impossible by design.
+	if strings.Contains(got, "/addrule name=uptime") {
+		t.Error("export offered a replay line for a non-chat-addable tool")
+	}
+}
+
+func TestRulesExportDegradedAndEmpty(t *testing.T) {
+	// Unwired: honest degrade.
+	c := &fakeClient{}
+	d, inbox := harness(t, fakeEngine{answer: "hi"}, c)
+	row := feed(t, inbox, 41, "/rules export")
+	d.Process(context.Background(), row)
+	if len(c.sends) != 1 || !strings.Contains(c.sends[0], "unavailable") {
+		t.Fatalf("unwired export = %v", c.sends)
+	}
+	// Wired but empty live set.
+	c2 := &fakeClient{}
+	d2, inbox2 := harness(t, fakeEngine{answer: "hi"}, c2)
+	d2.SetRulesExporter(fakeRulesExporter{})
+	row2 := feed(t, inbox2, 42, "/rules export")
+	d2.Process(context.Background(), row2)
+	if len(c2.sends) != 1 || !strings.Contains(c2.sends[0], "No rules to export") {
+		t.Fatalf("empty export = %v", c2.sends)
+	}
+}

@@ -334,6 +334,7 @@ func startTelegram(ctx context.Context, cfg config.Config, eng *engine.Engine,
 	dispatcher.SetStats(st)
 	dispatcher.SetHistory(st)
 	dispatcher.SetHealth(st)
+	dispatcher.SetRulesExporter(rt)
 
 	// Durable schedules (v8): rehydrate persisted /every jobs at boot and
 	// persist new ones — nightly deploys no longer silently wipe them.
