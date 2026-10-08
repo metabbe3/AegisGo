@@ -981,3 +981,103 @@ func TestStatsEndpointWindow(t *testing.T) {
 		t.Errorf("windows seen = %v, want [7 0] (explicit window then all-time default)", got)
 	}
 }
+
+// fakeRulesExporter is the smallest RulesExporter for /v1/rules/export
+// tests — no router compile needed, just the defs the handler renders.
+type fakeRulesExporter struct {
+	defs []router.RuleDef
+}
+
+func (f fakeRulesExporter) RuleDefs() []router.RuleDef { return f.defs }
+
+func TestRulesExportUnavailable(t *testing.T) {
+	// Unwired: 501, not a nil-deref panic (same contract as other Deps).
+	srv := httptest.NewServer(Handler(Deps{Engine: &fakeEngine{}, Answers: nopAnswers{}}))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/v1/rules/export")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotImplemented {
+		t.Fatalf("status = %d, want 501", resp.StatusCode)
+	}
+}
+
+func TestRulesExportRendersLiveSet(t *testing.T) {
+	srv := httptest.NewServer(Handler(Deps{
+		Engine:  &fakeEngine{},
+		Answers: nopAnswers{},
+		RulesExporter: fakeRulesExporter{defs: []router.RuleDef{
+			{Name: "csv_head", Pattern: `/csv_head (\S+)`, Tool: "read_csv", ArgsTemplate: `{"path":"$1"}`, Origin: "seed", State: ""},
+			{Name: "uptime", Pattern: "/uptime", Tool: "system_command", ArgsTemplate: `{"key":"uptime"}`, Origin: "seed", State: "active"},
+			{Name: "mined_3", Pattern: `/doc (\S+)`, Tool: "read_doc", ArgsTemplate: "", Origin: "mined", State: "shadow"},
+		}},
+	}))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/v1/rules/export")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var eb struct {
+		Count int            `json:"count"`
+		Rules []exportedRule `json:"rules"`
+	}
+	decodeInto(t, resp, &eb)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if eb.Count != 3 || len(eb.Rules) != 3 {
+		t.Fatalf("count = %d rules = %d, want 3/3", eb.Count, len(eb.Rules))
+	}
+	byName := map[string]exportedRule{}
+	for _, r := range eb.Rules {
+		byName[r.Name] = r
+	}
+	// Empty state defaults to active (legacy rows), empty args normalize
+	// to {} (what /addrule replay expects), allowlist flag mirrors the
+	// AddRuleGate allowlist.
+	if r := byName["csv_head"]; r.State != router.RuleActive || r.ChatAddable != true || r.ArgsTemplate != `{"path":"$1"}` {
+		t.Errorf("csv_head = %+v, want state=active chat_addable=true args=round-trip", r)
+	}
+	if r := byName["uptime"]; r.ChatAddable {
+		t.Errorf("uptime chat_addable = true, want false (system_command not replayable from chat)")
+	}
+	if r := byName["mined_3"]; r.State != router.RuleShadow || r.ArgsTemplate != "{}" || !r.ChatAddable {
+		t.Errorf("mined_3 = %+v, want state=shadow args={} chat_addable=true", r)
+	}
+}
+
+func TestRulesExportAuthGated(t *testing.T) {
+	// /v1/* Bearer gate covers the new route like every other one.
+	srv := httptest.NewServer(Handler(Deps{
+		Engine:        &fakeEngine{},
+		Answers:       nopAnswers{},
+		RulesExporter: fakeRulesExporter{},
+		AuthToken:     "sekrit",
+	}))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/v1/rules/export")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("no-token status = %d, want 401", resp.StatusCode)
+	}
+
+	req, _ := http.NewRequest("GET", srv.URL+"/v1/rules/export", nil)
+	req.Header.Set("Authorization", "Bearer sekrit")
+	resp2, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("bearer status = %d, want 200", resp2.StatusCode)
+	}
+}

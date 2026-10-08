@@ -104,18 +104,19 @@ func serve(ctx context.Context, tierFlag string) error {
 	srv := &http.Server{
 		Addr: cfg.Addr,
 		Handler: server.Handler(server.Deps{
-			Engine:    a.Engine,
-			Answers:   a.Store,
-			Readiness: a.Store,
-			Stats:     a.Store,   // GET /v1/stats
-			Health:    a.Store,   // GET /v1/health: self-audit REST mirror
-			Webhook:   a.Webhook, // nil unless Telegram runs in webhook mode
-			Approvals: a.Store,   // HITL REST (ADR-0008)
-			Tasks:     tasks,
-			Logger:    logger,
-			AuthToken: cfg.HTTPToken, // AEGIS_HTTP_TOKEN: empty = LAN-open, set = Bearer on /v1/*
-			Jobs:      a.Jobs,        // GET /v1/jobs: live download-job snapshots
-			Events:    pub,           // GET /v1/events: SSE live run feed
+			Engine:        a.Engine,
+			Answers:       a.Store,
+			Readiness:     a.Store,
+			Stats:         a.Store,   // GET /v1/stats
+			Health:        a.Store,   // GET /v1/health: self-audit REST mirror
+			Webhook:       a.Webhook, // nil unless Telegram runs in webhook mode
+			Approvals:     a.Store,   // HITL REST (ADR-0008)
+			Tasks:         tasks,
+			Logger:        logger,
+			AuthToken:     cfg.HTTPToken,   // AEGIS_HTTP_TOKEN: empty = LAN-open, set = Bearer on /v1/*
+			Jobs:          a.Jobs,          // GET /v1/jobs: live download-job snapshots
+			Events:        pub,             // GET /v1/events: SSE live run feed
+			RulesExporter: a.Engine.Router, // GET /v1/rules/export: live rule set as JSON (REST mirror of Telegram /rules export)
 			Dashboard: &server.DashboardDeps{ // mini status page at GET /
 				Stats: a.Store, Health: a.Store, StartedAt: time.Now(), Commit: version.Commit,
 			},
