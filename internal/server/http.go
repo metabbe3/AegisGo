@@ -17,6 +17,7 @@ import (
 
 	"aegisgo/internal/engine"
 	"aegisgo/internal/logx"
+	"aegisgo/internal/router"
 	"aegisgo/internal/store"
 	"aegisgo/internal/task"
 	"aegisgo/internal/trace"
@@ -42,6 +43,13 @@ type StatsSource interface {
 // source (error share, confidence, latency), not just run counts.
 type HealthSource interface {
 	Health(ctx context.Context) (*store.HealthSnapshot, error)
+}
+
+// RulesExporter is the live router view GET /v1/rules/export serves —
+// satisfied by *router.Router via RuleDefs(). Narrow on purpose: the
+// handler only reads, never mutates rule state.
+type RulesExporter interface {
+	RuleDefs() []router.RuleDef
 }
 
 // AnswerStore is the async answer store the API polls.
@@ -104,6 +112,11 @@ type Deps struct {
 	// Events, when non-nil, mounts GET /v1/events (SSE): one RunEvent per
 	// completed engine run, pushed live. nil = 503 like other unwired routes.
 	Events *EventPub
+	// RulesExporter, when non-nil, mounts GET /v1/rules/export — the live
+	// rule set as structured JSON (the REST mirror of Telegram's /rules
+	// export, merge #60), so scripts/CI can snapshot a box's router config
+	// without Telegram access. nil = 503 like other unwired routes.
+	RulesExporter RulesExporter
 	// AuthToken, when non-empty, gates every /v1/* route behind
 	// "Authorization: Bearer <token>" (constant-time). Empty = open
 	// (the LAN default). Health probes and the dashboard stay public.
@@ -187,6 +200,9 @@ func Handler(d Deps) http.Handler {
 
 	v1.HandleFunc("GET /v1/stats", func(w http.ResponseWriter, r *http.Request) {
 		statsHandler(w, r, d)
+	})
+	v1.HandleFunc("GET /v1/rules/export", func(w http.ResponseWriter, r *http.Request) {
+		rulesExportHandler(w, r, d)
 	})
 	v1.HandleFunc("GET /v1/health", func(w http.ResponseWriter, r *http.Request) {
 		healthHandler(w, r, d)
@@ -425,6 +441,68 @@ func statsHandler(w http.ResponseWriter, r *http.Request, d Deps) {
 // /health self-audit: error share, avg confidence and latency per
 // decision source. Same contract as the chat surface (merge #50) so
 // dashboards and scripts can consume it without Telegram.
+
+// exportedRule is one live rule in GET /v1/rules/export — RuleDef plus
+// the args-normalization and replay hints consumers need. ArgsTemplate is
+// normalized to "{}" when empty, matching what /addrule replay expects
+// (Telegram's export, merge #60).
+type exportedRule struct {
+	Name         string `json:"name"`
+	Pattern      string `json:"pattern"`
+	Tool         string `json:"tool"`
+	ArgsTemplate string `json:"args_template"`
+	Origin       string `json:"origin"`
+	State        string `json:"state"`
+	ChatAddable  bool   `json:"chat_addable"`
+}
+
+// chatAddableTool mirrors AddRuleGate's allowlist (read-only, path-arg
+// tools only — Telegram's chatAddable, merge #60). The flag says
+// "replayable via /addrule"; the allowlist itself lives with the gate.
+func chatAddableTool(tool string) bool {
+	switch tool {
+	case "read_csv", "csv_stats", "read_doc", "analyze_log":
+		return true
+	}
+	return false
+}
+
+// rulesExportHandler is GET /v1/rules/export — the REST mirror of
+// Telegram's /rules export (merge #60): the live rule set as structured
+// JSON instead of /addrule lines, so scripts and CI can snapshot a box's
+// router config (and diff two boxes) without Telegram access. Each rule
+// carries chat_addable so consumers know which entries /addrule would
+// accept on replay; state defaults to active for legacy rows, matching
+// RuleDef.EffectiveState. Read-only by design — the narrow RulesExporter
+// interface cannot mutate rule state.
+func rulesExportHandler(w http.ResponseWriter, r *http.Request, d Deps) {
+	if d.RulesExporter == nil {
+		writeErr(w, http.StatusNotImplemented, "rules export unavailable")
+		return
+	}
+	defs := d.RulesExporter.RuleDefs()
+	rules := make([]exportedRule, 0, len(defs))
+	for _, def := range defs {
+		args := strings.TrimSpace(def.ArgsTemplate)
+		if args == "" {
+			args = "{}"
+		}
+		rules = append(rules, exportedRule{
+			Name:         def.Name,
+			Pattern:      def.Pattern,
+			Tool:         def.Tool,
+			ArgsTemplate: args,
+			Origin:       def.Origin,
+			State:        def.EffectiveState(),
+			ChatAddable:  chatAddableTool(def.Tool),
+		})
+	}
+	writeOK(w, http.StatusOK, map[string]any{
+		"count": len(rules),
+		"rules": rules,
+	})
+}
+
 func healthHandler(w http.ResponseWriter, r *http.Request, d Deps) {
 	if d.Health == nil {
 		writeErr(w, http.StatusNotImplemented, "health unavailable")
