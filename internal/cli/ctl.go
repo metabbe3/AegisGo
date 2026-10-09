@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"aegisgo/internal/router"
 	"aegisgo/internal/tools"
 	"context"
 	"encoding/json"
@@ -23,6 +24,7 @@ import (
 // miner on demand, print stats, and replay a trace.
 //
 //	aegis ctl rules list
+//	aegis ctl rules export
 //	aegis ctl rules mine [--threshold N]
 //	aegis ctl rules promote <name> | demote <name>
 //	aegis ctl stats
@@ -57,7 +59,7 @@ func runCtl(args []string, stdout io.Writer) error {
 }
 
 func ctlUsage() error {
-	return fmt.Errorf("usage: aegis ctl rules list|mine|promote <name>|demote <name> | stats [days=N] | jobs | replay <trace-id>")
+	return fmt.Errorf("usage: aegis ctl rules list|export|mine|promote <name>|demote <name> | stats [days=N] | jobs | replay <trace-id>")
 }
 
 // jobsCmd lists live background jobs from the running server's GET
@@ -106,7 +108,7 @@ func jobsCmd(ctx context.Context, cfg config.Config, stdout io.Writer) error {
 
 func rulesCmd(ctx context.Context, st *store.Store, cfg config.Config, args []string, stdout io.Writer) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: aegis ctl rules list|mine|promote <name>|demote <name>")
+		return fmt.Errorf("usage: aegis ctl rules list|export|mine|promote <name>|demote <name>")
 	}
 	switch args[0] {
 	case "list":
@@ -119,6 +121,27 @@ func rulesCmd(ctx context.Context, st *store.Store, cfg config.Config, args []st
 			rows[i] = []any{r["name"], r["state"], r["origin"], r["enabled"], r["tool"], r["pattern"]}
 		}
 		return writeTable(stdout, []string{"NAME", "STATE", "ORIGIN", "ENABLED", "TOOL", "PATTERN"}, rows)
+	case "export":
+		// The enabled rule set from the DB (not the live router — ctl is
+		// the offline admin path; the daemon's own view is GET /v1/rules/export,
+		// merge #62). Output = /addrule replay lines (same dialect as
+		// Telegram /rules export, #60) so a box's rule config moves with a
+		// copy-paste, zero sqlite surgery.
+		defs, err := router.LoadRules(ctx, st)
+		if err != nil {
+			return err
+		}
+		var replay, ref int
+		for _, d := range defs {
+			if line, ok := d.ReplayLine(); ok {
+				fmt.Fprintln(stdout, "/addrule "+line)
+				replay++
+			} else {
+				ref++
+			}
+		}
+		fmt.Fprintf(stdout, "\n(%d live: %d replayable as /addrule, %d ship with the binary)\n", len(defs), replay, ref)
+		return nil
 	case "mine":
 		fs := flag.NewFlagSet("mine", flag.ContinueOnError)
 		th := fs.Int("threshold", cfg.MinerThreshold, "minimum cluster size")
