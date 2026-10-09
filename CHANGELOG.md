@@ -1,3 +1,21 @@
+## [2026-10-09] — merge #63 feat/ctl-rules-export (+ #62 changelog debt)
+
+- `ctl rules export` (CLI): offline admin twin of the export family — prints
+  the enabled rule set from the DB as `/addrule` replay lines (same dialect
+  as Telegram `/rules export` #60), no server needed. Non-chat-addable tools
+  are skipped from replay and counted in the summary line. Usage text
+  updated (`ctl rules list|export|…`).
+- Canonical export dialect module `internal/router/export.go`: the
+  chat-addable allowlist + args normalization + replay-line rendering lived
+  as three literal copies (Telegram #60, REST #62, addrule gate) — the third
+  duplication is when the repo extracts. One owner now; all four surfaces
+  (incl. ctl) delegate to `router.ChatAddable` / `router.Export` /
+  `RuleDef.ReplayLine`.
+- Changelog debt paid: merge #62 (REST `GET /v1/rules/export`, structured
+  JSON mirror with chat_addable replay hints) was merged 2026-10-08 without
+  its entry.
+- Gates: vet, 25/25 pkgs, make check, coverage 90.0%.
+
 ## [2026-10-07] — merge #60 feat/rules-export
 
 - `/rules export` (Telegram): renders the LIVE rule set as `/addrule` lines —

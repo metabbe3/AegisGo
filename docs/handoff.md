@@ -204,3 +204,8 @@ transport HTTP penuh. Queue malam ini:
 - DEBT-FIRST: no deploy debt (live 5801f0d == HEAD awal slot). Utang nyata = WIP lintas-slot `feat/rules-export` (#60) nyangkut di working tree — commit #61 sudah mereferensikannya — selesai + merged 844b595 malam ini. Changelog utang #59 (reconcile, merged 5 Okt tanpa entry) dibayar + cto-queue #59 → done. Push origin main 4-commit backlog dibayar.
 - BATCH: #60 rules-export (S) → deploy checkpoint → batch kecil item 2-3 (lihat laporan).
 - Export sizing check: 25 live rules ≈ 2.9KB < 4096 limit Telegram — satu pesan cukup.
+
+## 2026-10-09 21:5x — CTO Builder (batch-10, slot malam)
+- DEBT-FIRST: no deploy debt (live c2513ba == HEAD awal slot). WIP lintas-slot `feat/ctl-rules-export` (#63) diterima + diselesaikan (pola batch-8): import router hilang di ctl.go, test belum ada — selesai malam ini.
+- #63 MERGED: ctl rules export + canonical export dialect (internal/router/export.go jadi SATU pemilik ChatAddable/Export/ReplayLine; 4 surface delegate). Changelog utang #62 dibayar sekaligus.
+- Gate hijau: vet, 25/25, check, cover 90.0%. Deploy checkpoint menyusul merge.
