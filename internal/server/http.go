@@ -442,30 +442,10 @@ func statsHandler(w http.ResponseWriter, r *http.Request, d Deps) {
 // decision source. Same contract as the chat surface (merge #50) so
 // dashboards and scripts can consume it without Telegram.
 
-// exportedRule is one live rule in GET /v1/rules/export — RuleDef plus
-// the args-normalization and replay hints consumers need. ArgsTemplate is
-// normalized to "{}" when empty, matching what /addrule replay expects
-// (Telegram's export, merge #60).
-type exportedRule struct {
-	Name         string `json:"name"`
-	Pattern      string `json:"pattern"`
-	Tool         string `json:"tool"`
-	ArgsTemplate string `json:"args_template"`
-	Origin       string `json:"origin"`
-	State        string `json:"state"`
-	ChatAddable  bool   `json:"chat_addable"`
-}
-
-// chatAddableTool mirrors AddRuleGate's allowlist (read-only, path-arg
-// tools only — Telegram's chatAddable, merge #60). The flag says
-// "replayable via /addrule"; the allowlist itself lives with the gate.
-func chatAddableTool(tool string) bool {
-	switch tool {
-	case "read_csv", "csv_stats", "read_doc", "analyze_log":
-		return true
-	}
-	return false
-}
+// exportedRule is the REST wire form — router.ExportedRule under the
+// endpoint's own name kept for decode tests; the canonical shape (and
+// the chat_addable allowlist) lives in internal/router (merge #63).
+type exportedRule = router.ExportedRule
 
 // rulesExportHandler is GET /v1/rules/export — the REST mirror of
 // Telegram's /rules export (merge #60): the live rule set as structured
@@ -481,22 +461,7 @@ func rulesExportHandler(w http.ResponseWriter, r *http.Request, d Deps) {
 		return
 	}
 	defs := d.RulesExporter.RuleDefs()
-	rules := make([]exportedRule, 0, len(defs))
-	for _, def := range defs {
-		args := strings.TrimSpace(def.ArgsTemplate)
-		if args == "" {
-			args = "{}"
-		}
-		rules = append(rules, exportedRule{
-			Name:         def.Name,
-			Pattern:      def.Pattern,
-			Tool:         def.Tool,
-			ArgsTemplate: args,
-			Origin:       def.Origin,
-			State:        def.EffectiveState(),
-			ChatAddable:  chatAddableTool(def.Tool),
-		})
-	}
+	rules := router.Export(defs)
 	writeOK(w, http.StatusOK, map[string]any{
 		"count": len(rules),
 		"rules": rules,

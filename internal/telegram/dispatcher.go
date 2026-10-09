@@ -417,19 +417,6 @@ type rulesExporter interface {
 // SetRulesExporter wires the live router for /rules export.
 func (d *Dispatcher) SetRulesExporter(r rulesExporter) { d.rulesExport = r }
 
-// chatAddable mirrors AddRuleGate's allowlist (read-only, path-arg tools
-// only — Hard Rule 12 symmetry) so the export only emits lines the replay
-// dialect can actually accept. Kept here as a literal copy with a comment
-// pointing at addrulegate.go: telegram must not import app (import-cycle
-// rule for gated actions).
-func chatAddable(tool string) bool {
-	switch tool {
-	case "read_csv", "csv_stats", "read_doc", "analyze_log":
-		return true
-	}
-	return false
-}
-
 // rulesExportText renders the live rule set as /addrule lines — the same
 // dialect /addrule creates rules in — so an export can be replayed on a
 // fresh box with zero sqlite surgery. Rules whose tool is not chat-addable
@@ -447,13 +434,8 @@ func (d *Dispatcher) rulesExportText() string {
 	}
 	var replay, ref []string
 	for _, d := range defs {
-		args := strings.TrimSpace(d.ArgsTemplate)
-		if args == "" {
-			args = "{}"
-		}
-		if chatAddable(d.Tool) {
-			replay = append(replay, fmt.Sprintf("/addrule name=%s | pattern=%s | tool=%s | args=%s",
-				d.Name, d.Pattern, d.Tool, args))
+		if line, ok := d.ReplayLine(); ok {
+			replay = append(replay, "/addrule "+line)
 		} else {
 			ref = append(ref, fmt.Sprintf("%s → %s → %s", d.Name, d.Pattern, d.Tool))
 		}

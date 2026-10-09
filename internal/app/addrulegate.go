@@ -124,14 +124,11 @@ func parseAddRule(text string) (*ruleSpec, error) {
 	return spec, nil
 }
 
-// addableTools is the allowlist (Hard Rule 12 symmetry). mapset as slice
-// check — three entries, a map is overkill.
+// addableTools delegates to router.ChatAddable — the canonical export
+// allowlist (merge #63). mapset as slice check — three entries, a map is
+// overkill.
 func addableTool(t string) bool {
-	switch t {
-	case "read_csv", "csv_stats", "read_doc", "analyze_log":
-		return true
-	}
-	return false
+	return router.ChatAddable(t)
 }
 
 // addruleKeys are the keys a NEW pipe segment may start with; anything

@@ -321,3 +321,31 @@ func TestCtlJobs(t *testing.T) {
 		t.Fatalf("ctl jobs down: want error, got nil (out=%q)", out.String())
 	}
 }
+
+// TestCtlRulesExportReplayLines: `ctl rules export` prints one /addrule
+// replay line per chat-addable rule plus the summary counts — the
+// offline twin of Telegram /rules export (#60) and GET /v1/rules/export
+// (#62). Without #63 the subcommand didn't exist (usage error).
+func TestCtlRulesExportReplayLines(t *testing.T) {
+	withDB(t, func(ctx context.Context, st *store.Store) {
+		seedRule(ctx, st, "uptime", "/uptime", "system_command", "seed")
+		seedRule(ctx, st, "mined_1", `summarize\s+(\S+)`, "read_csv", "mined")
+	})
+	var buf bytes.Buffer
+	if err := runCtl([]string{"rules", "export"}, &buf); err != nil {
+		t.Fatalf("rules export: %v", err)
+	}
+	out := buf.String()
+	// chat-addable rule → full /addrule replay line, dialect = #60/#61
+	if !strings.Contains(out, "/addrule name=mined_1 | pattern=summarize\\s+(\\S+) | tool=read_csv | args=") {
+		t.Errorf("export output %q, want a replay line for mined_1", out)
+	}
+	// non-addable rule (system_command) → reference-only, NO replay line
+	if strings.Contains(out, "/addrule name=uptime") {
+		t.Errorf("export output %q, uptime must not be replayable", out)
+	}
+	// summary counts: 2 live, 1 replayable, 1 ships-with-binary
+	if !strings.Contains(out, "(2 live: 1 replayable as /addrule, 1 ship with the binary)") {
+		t.Errorf("export output %q, want the summary line", out)
+	}
+}
