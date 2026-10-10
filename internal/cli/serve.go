@@ -138,8 +138,7 @@ func serve(ctx context.Context, tierFlag string) error {
 		if err != nil {
 			return err
 		}
-		grpcSrv = grpc.NewServer()
-		grpcapi.Register(grpcSrv, grpcapi.New(a.Engine, a.Store, a.Store, tasks, logger))
+		grpcSrv = grpcapi.NewServer(grpcapi.New(a.Engine, a.Store, a.Store, tasks, logger), cfg.GRPCToken)
 		go func() {
 			logger.Info("listening", "addr", cfg.GRPCAddr, "proto", "grpc")
 			errCh <- grpcSrv.Serve(lis)

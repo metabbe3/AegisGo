@@ -189,6 +189,7 @@ AEGIS_LLM=off bin/aegis agent /csv_head testdata/sample.csv 1
 | `AEGIS_WORKSPACE` | root file tools may read — security boundary |
 | `AEGIS_MCP_SERVERS` | external MCP servers (stdio/HTTP) |
 | `AEGIS_MCP_TOKEN` | REQUIRED bearer token for `mcp-server --http` (empty refuses to serve remotely; stdio needs no token) |
+| `AEGIS_GRPC_TOKEN` | optional bearer token for the gRPC Agent service (empty = open LAN posture, same as `AEGIS_HTTP_TOKEN`; health/reflection stay token-free) |
 | `AEGIS_DB_PATH` | embedded SQLite file (audit, rules, answers) |
 | `AEGIS_SQL_DSN` / `AEGIS_SQL_MODE` | sql_query backend / `ro`\|`rw` |
 | `AEGIS_RULES_RELOAD` | rules hot-reload seconds (0 = off) |

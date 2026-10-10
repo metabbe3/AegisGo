@@ -147,6 +147,7 @@ func TestLoadFromEnv(t *testing.T) {
 	t.Setenv("AEGIS_MINER_PROMOTE_AFTER", " 6 ")
 	t.Setenv("AEGIS_MINER_INTERVAL", " 7200 ")
 	t.Setenv("AEGIS_TELEGRAM_TOKEN", " tok ")
+	t.Setenv("AEGIS_GRPC_TOKEN", " gtok ")
 	// Non-numeric chat IDs are skipped, not fatal: the allowlist is
 	// best-effort parsed so one bad entry cannot take the bot down.
 	t.Setenv("AEGIS_TELEGRAM_CHATS", "42, -7, x,")
@@ -187,6 +188,7 @@ func TestLoadFromEnv(t *testing.T) {
 		MinerIntervalSecs: 7200,
 
 		TelegramToken:         "tok",
+		GRPCToken:             "gtok",
 		TelegramChats:         []int64{42, -7},
 		TelegramMode:          "webhook",
 		TelegramWebhookURL:    "https://bot.example.com/hook",

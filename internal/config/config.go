@@ -116,6 +116,11 @@ type Config struct {
 	// already local, while an HTTP listener is reachable by anything on
 	// the network.
 	MCPToken string
+	// GRPCToken gates the gRPC Agent service (AEGIS_GRPC_TOKEN,
+	// constant-time compare). Same posture as HTTPToken: empty keeps the
+	// server open on the LAN; health + reflection stay token-free either
+	// way so orchestrator probes keep working.
+	GRPCToken string
 	// TelegramToken enables the Telegram interface; empty (default) keeps
 	// the whole subsystem dormant — built, wired, and one env var away.
 	TelegramToken string
@@ -186,6 +191,7 @@ func Load() Config {
 		TelegramToken:         envTrim("AEGIS_TELEGRAM_TOKEN"),
 		HTTPToken:             envTrim("AEGIS_HTTP_TOKEN"),
 		MCPToken:              envTrim("AEGIS_MCP_TOKEN"),
+		GRPCToken:             envTrim("AEGIS_GRPC_TOKEN"),
 		TelegramChats:         parseInt64List(os.Getenv("AEGIS_TELEGRAM_CHATS")),
 		TelegramMode:          envOr("AEGIS_TELEGRAM_MODE", "auto"),
 		TelegramWebhookURL:    envTrim("AEGIS_TELEGRAM_WEBHOOK_URL"),

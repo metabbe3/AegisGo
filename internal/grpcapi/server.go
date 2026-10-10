@@ -74,9 +74,7 @@ func Register(s *grpc.Server, srv *Server) {
 
 // Serve blocks serving gRPC on the listener until it stops.
 func Serve(l net.Listener, srv *Server) error {
-	s := grpc.NewServer()
-	Register(s, srv)
-	return s.Serve(l)
+	return NewServer(srv, "").Serve(l)
 }
 
 func (s *Server) Run(ctx context.Context, req *pb.RunRequest) (*pb.RunResponse, error) {
