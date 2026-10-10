@@ -1,3 +1,17 @@
+## [2026-10-10] — merge #64 feat/grpc-token
+
+- `AEGIS_GRPC_TOKEN`: bearer auth for the gRPC Agent service (Run/RunAsync/
+  GetAnswer/Ready) via unary+stream server interceptors, constant-time
+  compare — the gRPC twin of the REST `bearerAuth` middleware. Previously
+  :8081 exposed the full engine to the LAN with zero auth while REST at
+  least had the optional `AEGIS_HTTP_TOKEN` gate (backlog aegis-50).
+- grpc.health.v1 and server reflection stay token-free by design so
+  orchestrator probes keep working (parity with plain `/healthz`).
+- Empty token keeps the legacy open posture (LAN default), matching
+  `AEGIS_HTTP_TOKEN` semantics; one construction path (`grpcapi.NewServer`)
+  so cli wiring and `Serve` cannot drift apart.
+- Gates: vet, 26/26 pkgs, make check, coverage 90.0%+.
+
 ## [2026-10-09] — merge #63 feat/ctl-rules-export (+ #62 changelog debt)
 
 - `ctl rules export` (CLI): offline admin twin of the export family — prints
