@@ -268,6 +268,7 @@ The router serves it instantly everywhere (Telegram/HTTP/CLI) — the /api_perf 
 - `/health` — self-audit: error share + avg confidence + latency per decision source
 - `/reload_rules` (✅/🚫 gated) — hot-reload router rules
 - `/addrule name=X | pattern=/x | tool=read_doc | args={"path":"docs/$1"}` — add a router rule from chat (gated; tools: `read_csv` `csv_stats` `read_doc`)
+- `/register_rules` + paste a `/rules export` (✅/🚫 gated) — batch-import a rule config: every line parses strictly BEFORE the approval exists, one approval for the whole batch, idempotent upsert by name. Box-to-box config moves with two messages (export there, paste here).
 
 **⬇️ Other**
 - `/jobs` · `/cancel_job <id>` · `/help`

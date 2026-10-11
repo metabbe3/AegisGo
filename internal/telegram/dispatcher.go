@@ -389,7 +389,8 @@ func (d *Dispatcher) helpText() string {
 		"`/health` — self-audit: errors & confidence per source\n" +
 		"`/approvals` · `/approve <id>` · `/deny <id>`\n" +
 		"`/reload_rules` — hot-reload rules (✅/🚫)\n" +
-		"`/addrule name=X | pattern=/x | tool=read_doc | args={\"path\":\"docs/$1\"}`\n\n" +
+		"`/addrule name=X | pattern=/x | tool=read_doc | args={\"path\":\"docs/$1\"}`\n" +
+		"`/register_rules` — paste /rules export → import batch (✅/🚫)\n\n" +
 		"*⬇️ Lainnya*\n" +
 		"`/jobs` · `/cancel_job <id>`\n\n" +
 		"Selain command → LLM (jika aktif)."
