@@ -1,3 +1,21 @@
+## [2026-10-11] — merge #65 feat/register-rules
+
+- `/register_rules` (Telegram, ✅/🚫 gated): paste a `/rules export` and the
+  whole batch imports in ONE approval — the import twin of the export family
+  (#60-#63). Box-to-box rule config moves with two messages: `/rules export`
+  on the source box, paste into `/register_rules` on the target.
+- Strict-before-approval semantics (same philosophy as /addrule): EVERY
+  /addrule line parses and validates (slash-anchored, allowlisted tools,
+  compiling regex) BEFORE any approval row exists; one bad line rejects the
+  whole batch — the human approves a batch that cannot half-fail.
+- Run is idempotent upsert (`ON CONFLICT(name) DO UPDATE`): replaying a box's
+  own export converges instead of duplicating; non-addable lines in an export
+  (reference list) are skipped, not errors.
+- Same ChatAddable allowlist as /addrule (Hard Rule 12 symmetry), re-checked
+  at Run time (defense in depth); batch capped at 50 lines (bounded input).
+- Help text + README updated; coverage 90.0% gate held (new gate tests cover
+  approved/denied/idempotent-replay/swap-failure/usage branches).
+
 ## [2026-10-10] — merge #64 feat/grpc-token
 
 - `AEGIS_GRPC_TOKEN`: bearer auth for the gRPC Agent service (Run/RunAsync/

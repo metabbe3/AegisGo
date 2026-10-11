@@ -330,6 +330,11 @@ func startTelegram(ctx context.Context, cfg config.Config, eng *engine.Engine,
 	ag := &AddRuleGate{Store: st, Router: rt}
 	dispatcher.RegisterGated(map[string]telegram.GatedAction{"/addrule": addRuleText{g: ag}})
 
+	// /register_rules (#65): replay a /rules export back into this box in
+	// one gated batch — the import twin of the export family (#60-#63).
+	rg2 := &RegisterRulesGate{Store: st, Router: rt}
+	dispatcher.RegisterGated(map[string]telegram.GatedAction{"/register_rules": registerRulesText{g: rg2}})
+
 	// /status + /history share the store REST already serves.
 	dispatcher.SetStats(st)
 	dispatcher.SetHistory(st)
