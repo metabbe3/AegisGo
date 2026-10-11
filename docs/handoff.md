@@ -209,3 +209,9 @@ transport HTTP penuh. Queue malam ini:
 - DEBT-FIRST: no deploy debt (live c2513ba == HEAD awal slot). WIP lintas-slot `feat/ctl-rules-export` (#63) diterima + diselesaikan (pola batch-8): import router hilang di ctl.go, test belum ada — selesai malam ini.
 - #63 MERGED: ctl rules export + canonical export dialect (internal/router/export.go jadi SATU pemilik ChatAddable/Export/ReplayLine; 4 surface delegate). Changelog utang #62 dibayar sekaligus.
 - Gate hijau: vet, 25/25, check, cover 90.0%. Deploy checkpoint menyusul merge.
+
+## 2026-10-11 20:2x — deploy-close #65 (agent-utama, owner "Lanjutkan")
+- RESTART: launchctl kickstart -k gui/501/com.aegisgo.serve → PID baru 2950, healthz ok, GET / stamp 954b883 (live==HEAD ✓)
+- PUSH: origin main d80c4b2..954b883 (4 commit: docs batch-10 + #65)
+- MENU: setMyCommands ok=true (+help/rules/register_rules/addrule/uptime) — utang batch-11 LUNAS
+- Next: MCP-HTTP smoke pasca-#56/#57 (restart storm), serve.log rotation check (ukur dulu)
