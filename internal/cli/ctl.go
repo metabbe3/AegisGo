@@ -20,15 +20,16 @@ import (
 )
 
 // runCtl is the offline admin tool: it operates directly on the AegisGo
-// database (no server needed) to list/promote/demote router rules, run the
+// database (no server needed) to list/export/import router rules, run the
 // miner on demand, print stats, and replay a trace.
 //
-//	aegis ctl rules list
-//	aegis ctl rules export
-//	aegis ctl rules mine [--threshold N]
-//	aegis ctl rules promote <name> | demote <name>
-//	aegis ctl stats
-//	aegis ctl replay <trace-id>
+// aegis ctl rules list
+// aegis ctl rules export
+// aegis ctl rules import [-f=<file>]
+// aegis ctl rules mine [--threshold N]
+// aegis ctl rules promote <name> | demote <name>
+// aegis ctl stats
+// aegis ctl replay <trace-id>
 func runCtl(args []string, stdout io.Writer) error {
 	cfg := config.Load()
 	st, err := store.Open(cfg.DBPath)
@@ -59,7 +60,7 @@ func runCtl(args []string, stdout io.Writer) error {
 }
 
 func ctlUsage() error {
-	return fmt.Errorf("usage: aegis ctl rules list|export|mine|promote <name>|demote <name> | stats [days=N] | jobs | replay <trace-id>")
+	return fmt.Errorf("usage: aegis ctl rules list|export|import|mine|promote <name>|demote <name> | stats [days=N] | jobs | replay <trace-id>")
 }
 
 // jobsCmd lists live background jobs from the running server's GET
@@ -108,7 +109,7 @@ func jobsCmd(ctx context.Context, cfg config.Config, stdout io.Writer) error {
 
 func rulesCmd(ctx context.Context, st *store.Store, cfg config.Config, args []string, stdout io.Writer) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: aegis ctl rules list|export|mine|promote <name>|demote <name>")
+		return fmt.Errorf("usage: aegis ctl rules list|export|import [-f=<file>]|mine|promote <name>|demote <name>")
 	}
 	switch args[0] {
 	case "list":
@@ -142,6 +143,16 @@ func rulesCmd(ctx context.Context, st *store.Store, cfg config.Config, args []st
 		}
 		fmt.Fprintf(stdout, "\n(%d live: %d replayable as /addrule, %d ship with the binary)\n", len(defs), replay, ref)
 		return nil
+	case "import":
+		// The import twin of export (#66): replay a saved /rules export
+		// back into THIS box from the CLI. Same semantics as the Telegram
+		// /register_rules gate (#65) — strict parse of every line BEFORE
+		// any row exists, chat-addable tools only, idempotent upsert — but
+		// NO approval wait: ctl is the owner-at-keyboard admin path, the
+		// operator's Enter key IS the approval. Needs the live router for
+		// the post-import Swap; reads it from the daemon's GET /v1/rules
+		// only as a fallback display when the daemon is down.
+		return importRulesCmd(ctx, st, cfg, args[1:], stdout)
 	case "mine":
 		fs := flag.NewFlagSet("mine", flag.ContinueOnError)
 		th := fs.Int("threshold", cfg.MinerThreshold, "minimum cluster size")

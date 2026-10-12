@@ -146,6 +146,32 @@ func (g *RegisterRulesGate) Handle(ctx context.Context, text string) (any, tools
 	return tools.RunGated(ctx, lv, g.GateConfig(), "register_rules", "{}", reason, run)
 }
 
+// ReplayAddruleLines is the offline twin of Handle, used by the ctl admin
+// path (`aegis ctl rules import`, #66): same strict parse, same allowlist,
+// same idempotent upsert + Swap — but NO approval ledger row, because ctl
+// is the owner-at-keyboard surface and the operator's Enter key IS the
+// approval. Returns how many rules were imported and the resulting live
+// rule count.
+func (g *RegisterRulesGate) ReplayAddruleLines(ctx context.Context, text string) (imported, live int, err error) {
+	specs, err := parseRegisterRules(text)
+	if err != nil {
+		return 0, 0, err // nothing written on a bad batch
+	}
+	out, err := g.Run(ctx, specs)
+	if err != nil {
+		return 0, 0, err
+	}
+	if m, ok := out.(map[string]any); ok {
+		if v, ok := m["registered"].(int); ok {
+			imported = v
+		}
+		if v, ok := m["rules"].(int); ok {
+			live = v
+		}
+	}
+	return imported, live, nil
+}
+
 // registerRulesText adapts RegisterRulesGate to telegram.GatedAction,
 // mirroring addRuleText's honest outcome rendering.
 type registerRulesText struct{ g *RegisterRulesGate }
