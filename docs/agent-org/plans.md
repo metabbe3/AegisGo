@@ -59,6 +59,17 @@ jangan hapus histori; item selesai tinggal diberi tanggal.
 - [x] Interactive approval buttons ✅/🚫 (eb850e2)
 - [x] docs/org-memory: lessons-learned.md + plans.md (branch ini)
 
+## In plan — batch-11 CTO (2026-10-13)
+
+- [x] #67 `aegis ctl backup` — backup manual on-demand (S): backupOnce
+      sudah ada (daily 04:30); ctl = jalankan SEKARANG + daftar sidecar +
+      retention. Owner-testable pre-restore. DONE 2026-10-14 (merge #67).
+- [ ] #68 `/backup` gated Telegram (S): backup = L2 (data durability),
+      harus ✅/🚫; reuse BackupGate di app, RegisterGated wiring, help text.
+- [ ] #69 `aegis ctl health [days=N]` — offline twin /health (S):
+      HealthWindow render human (bukan JSON mentah) — owner cek performa
+      bot dari terminal tanpa buka browser.
+
 ## Blocked / Ditolak
 
 - (kosong — catat keputusan tolak/blocked di sini beserta alasan &

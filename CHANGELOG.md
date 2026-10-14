@@ -1,3 +1,24 @@
+## [2026-10-14] — merge #67 feat/ctl-backup
+
+- `aegis ctl backup` — run one sidecar backup NOW instead of waiting for the
+  daily 04:30 timer (queue #67, S). Same `backupOnce` path (VACUUM INTO +
+  prune-to-7) exposed via `app.BackupNow`; naming/retention stay owned by
+  `internal/app` so the daemon timer and the on-demand command can never
+  drift.
+- `aegis ctl backup list` — sidecar history newest-first with sizes and the
+  retention summary: verify a backup BEFORE a restore needs it (an untested
+  backup is a hope, not a plan).
+- Sidecar naming centralized in `app.SidecarPath` (+ test-only `sidecarParts`
+  in cli) so the run and the listing share one source of truth.
+- WIP-repair notes: fixed a WIP test that pinned the US spelling
+  "canceled" against the manager constant `JobCancelled` ("cancelled") and
+  blocked the job body on a channel the test never released (a body must
+  select on ctx.Done() — Cancel fires the context); removed a stray
+  `backup [list]` clause from the `rules` usage line.
+- WORKFLOW.md recipe added; coverage gate 90.0% held with new tests (real
+  sidecar artifact + openable-as-SQLite check, list ordering, empty box,
+  bad-arg atomicity).
+
 ## [2026-10-11] — merge #65 feat/register-rules
 
 - `/register_rules` (Telegram, ✅/🚫 gated): paste a `/rules export` and the
