@@ -47,6 +47,8 @@ func runCtl(args []string, stdout io.Writer) error {
 		return rulesCmd(ctx, st, cfg, args[1:], stdout)
 	case "stats":
 		return statsCmd(ctx, st, args[1:], stdout)
+	case "backup":
+		return backupCmd(ctx, st, cfg, args[1:], stdout)
 	case "jobs":
 		return jobsCmd(ctx, cfg, stdout)
 	case "replay":
@@ -60,7 +62,7 @@ func runCtl(args []string, stdout io.Writer) error {
 }
 
 func ctlUsage() error {
-	return fmt.Errorf("usage: aegis ctl rules list|export|import|mine|promote <name>|demote <name> | stats [days=N] | jobs | replay <trace-id>")
+	return fmt.Errorf("usage: aegis ctl rules list|export|import|mine|promote <name>|demote <name> | stats [days=N] | jobs | replay <trace-id> | backup [list]")
 }
 
 // jobsCmd lists live background jobs from the running server's GET

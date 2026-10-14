@@ -298,3 +298,17 @@ Deterministic (zero LLM): buckets timestamps → least-squares + EWMA → ETA to
 threshold, level (stable/rising/falling/volatile), confidence, and a bounded
 `recommended_action` (scaling hint is a recommendation — executor wiring is a
 future gated action per ADR-0005/0008).
+
+
+## Recipe — on-demand backup + sidecar history (merge #67)
+
+```
+aegis ctl backup          # run one sidecar backup NOW (VACUUM INTO + prune to 7)
+aegis ctl backup list     # sidecar history, newest first, with retention summary
+```
+
+Same `backupOnce` path as the daily 04:30 loop (`internal/app/backup.go`) —
+naming and retention are owned by `internal/app` so the daemon timer and the
+on-demand command can never drift. Verify a backup BEFORE a restore needs it:
+`list` shows each sidecar's size; the file is a real SQLite snapshot (VACUUM
+INTO), openable read-only.
